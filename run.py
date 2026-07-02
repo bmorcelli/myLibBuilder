@@ -40,6 +40,9 @@ def parse_versions(text: str) -> Dict[str, Dict[str, object]]:
 def checkout_submodule_version(repo_path: Path, version: Tuple[str, str]) -> None:
     if not repo_path.exists():
         raise FileNotFoundError(f"Submodule not found: {repo_path}")
+
+    subprocess.run(["git", "-C", str(repo_path), "fetch", "--all", "--tags", "--prune"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
     branch, commit = version
     if branch and branch != "master":
         try:
@@ -47,7 +50,14 @@ def checkout_submodule_version(repo_path: Path, version: Tuple[str, str]) -> Non
         except subprocess.CalledProcessError:
             pass
     if commit:
-        subprocess.run(["git", "-C", str(repo_path), "checkout", commit], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            subprocess.run(["git", "-C", str(repo_path), "checkout", commit], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except subprocess.CalledProcessError:
+            short_commit = commit[:12]
+            try:
+                subprocess.run(["git", "-C", str(repo_path), "checkout", short_commit], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except subprocess.CalledProcessError:
+                subprocess.run(["git", "-C", str(repo_path), "checkout", "HEAD"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def update_component_versions(repo_path: Path, versions: Dict[str, str]) -> None:
