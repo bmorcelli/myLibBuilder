@@ -3,6 +3,7 @@ import argparse
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Dict, Tuple
 
@@ -37,38 +38,57 @@ def parse_versions(text: str) -> Dict[str, Dict[str, object]]:
     return {"repos": repos, "components": components}
 
 
+def run_git(repo_path: Path, *args: str, capture: bool = False) -> subprocess.CompletedProcess[str]:
+    cmd = ["git", "-C", str(repo_path), *args]
+    print(f"[git] {' '.join(cmd)}", flush=True)
+    if capture:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.stdout:
+            print(result.stdout, end="", flush=True)
+        if result.stderr:
+            print(result.stderr, end="", file=sys.stderr, flush=True)
+    else:
+        result = subprocess.run(cmd)
+    if result.returncode != 0:
+        raise subprocess.CalledProcessError(result.returncode, cmd, output=getattr(result, "stdout", None), stderr=getattr(result, "stderr", None))
+    return result
+
+
 def checkout_submodule_version(repo_path: Path, version: Tuple[str, str]) -> None:
     if not repo_path.exists():
         raise FileNotFoundError(f"Submodule not found: {repo_path}")
 
+    remotes = run_git(repo_path, "remote", capture=True).stdout.splitlines()
     remote_name = None
-    remotes = subprocess.run(["git", "-C", str(repo_path), "remote"], check=True, capture_output=True, text=True).stdout.splitlines()
-    if remotes:
-        remote_name = "upstream" if "upstream" in remotes else "origin"
+    if "upstream" in remotes:
+        remote_name = "upstream"
+    elif "origin" in remotes:
+        remote_name = "origin"
 
     if remote_name is None:
         raise RuntimeError(f"Submodule {repo_path} has no configured remotes")
 
-    remote_url = subprocess.run(["git", "-C", str(repo_path), "remote", "get-url", remote_name], check=True, capture_output=True, text=True).stdout.strip()
+    remote_url = run_git(repo_path, "remote", "get-url", remote_name, capture=True).stdout.strip()
+
     if remote_name == "origin" and "upstream" not in remotes:
-        subprocess.run(["git", "-C", str(repo_path), "remote", "add", "upstream", remote_url], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        run_git(repo_path, "remote", "add", "upstream", remote_url)
         remote_name = "upstream"
 
-    subprocess.run(["git", "-C", str(repo_path), "fetch", remote_name, "--tags", "--prune", "--force"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    run_git(repo_path, "fetch", remote_name, "--tags", "--prune", "--force")
 
-    if subprocess.run(["git", "-C", str(repo_path), "rev-parse", "--is-shallow-repository"], check=True, capture_output=True, text=True).stdout.strip() == "true":
-        subprocess.run(["git", "-C", str(repo_path), "fetch", "--unshallow", remote_name, "--tags", "--prune", "--force"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if run_git(repo_path, "rev-parse", "--is-shallow-repository", capture=True).stdout.strip() == "true":
+        run_git(repo_path, "fetch", "--unshallow", remote_name, "--tags", "--prune", "--force")
 
     branch, commit = version
     if branch and branch != "master":
-        subprocess.run(["git", "-C", str(repo_path), "fetch", remote_name, branch, "--force"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["git", "-C", str(repo_path), "checkout", branch], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        run_git(repo_path, "fetch", remote_name, branch, "--force")
+        run_git(repo_path, "checkout", branch)
 
     if commit:
         commit_check = subprocess.run(["git", "-C", str(repo_path), "rev-parse", "--verify", commit], check=False, capture_output=True, text=True)
         if commit_check.returncode != 0:
             raise RuntimeError(f"Commit '{commit}' was not found in {repo_path} after fetching from {remote_name}")
-        subprocess.run(["git", "-C", str(repo_path), "checkout", commit], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        run_git(repo_path, "checkout", commit)
 
 
 def update_component_versions(repo_path: Path, versions: Dict[str, str]) -> None:
