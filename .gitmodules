@@ -1,0 +1,9 @@
+[submodule "esp-idf"]
+	path = esp-idf
+	url = https://github.com/espressif/esp-idf.git
+[submodule "esp32-arduino-lib-builder"]
+	path = esp32-arduino-lib-builder
+	url = https://github.com/espressif/esp32-arduino-lib-builder.git
+[submodule "arduino-esp32"]
+	path = arduino-esp32
+	url = https://github.com/espressif/arduino-esp32.git
