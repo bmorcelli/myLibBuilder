@@ -180,7 +180,7 @@ def build_target(target: str) -> None:
     env["IDF_PATH"] = str(SUBMODULES["esp-idf"])
     env["AR_SOURCE_BRANCH"] = "master"
     env["IDF_BRANCH"] = "master"
-    subprocess.run(["bash", "build.sh", "-t", target, "-b", "build"], cwd=builder_dir, check=True, env=env)
+    subprocess.run(["bash", "build.sh", "-t", target, "-e"], cwd=builder_dir, check=True, env=env)
 
 
 def main() -> None:
