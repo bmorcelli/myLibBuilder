@@ -38,7 +38,7 @@ def parse_versions(text: str) -> Dict[str, Dict[str, object]]:
     return {"repos": repos, "components": components}
 
 
-def run_git(repo_path: Path, *args: str, capture: bool = False) -> subprocess.CompletedProcess[str]:
+def run_git(repo_path: Path, *args: str, capture: bool = False, check: bool = True) -> subprocess.CompletedProcess[str]:
     cmd = ["git", "-C", str(repo_path), *args]
     print(f"[git] {' '.join(cmd)}", flush=True)
     if capture:
@@ -49,7 +49,7 @@ def run_git(repo_path: Path, *args: str, capture: bool = False) -> subprocess.Co
             print(result.stderr, end="", file=sys.stderr, flush=True)
     else:
         result = subprocess.run(cmd)
-    if result.returncode != 0:
+    if check and result.returncode != 0:
         raise subprocess.CalledProcessError(result.returncode, cmd, output=getattr(result, "stdout", None), stderr=getattr(result, "stderr", None))
     return result
 
@@ -74,10 +74,10 @@ def checkout_submodule_version(repo_path: Path, version: Tuple[str, str]) -> Non
         run_git(repo_path, "remote", "add", "upstream", remote_url)
         remote_name = "upstream"
 
-    run_git(repo_path, "fetch", remote_name, "--tags", "--prune", "--force")
+    run_git(repo_path, "fetch", remote_name, "--tags", "--prune", "--force", "--recurse-submodules=no", check=False)
 
     if run_git(repo_path, "rev-parse", "--is-shallow-repository", capture=True).stdout.strip() == "true":
-        run_git(repo_path, "fetch", "--unshallow", remote_name, "--tags", "--prune", "--force")
+        run_git(repo_path, "fetch", "--unshallow", remote_name, "--tags", "--prune", "--force", "--recurse-submodules=no", check=False)
 
     branch, commit = version
     if branch and branch != "master":

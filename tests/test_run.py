@@ -48,6 +48,28 @@ espressif__cbor: 0.6.1~4
             with self.assertRaises(RuntimeError):
                 checkout_submodule_version(repo_dir, ("master", "deadbeef"))
 
+    def test_checkout_submodule_version_skips_recursive_submodule_fetches(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_dir = Path(tmpdir)
+            subprocess.run(["git", "init"], cwd=repo_dir, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo_dir, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo_dir, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["git", "branch", "-M", "master"], cwd=repo_dir, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            remote_dir = repo_dir / "remote.git"
+            subprocess.run(["git", "init", "--bare", str(remote_dir)], cwd=repo_dir, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["git", "remote", "add", "origin", str(remote_dir)], cwd=repo_dir, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            (repo_dir / ".gitmodules").write_text("[submodule \"dummy\"]\n\tpath = submod\n\turl = https://example.invalid/nope\n", encoding="utf-8")
+            (repo_dir / "submod").mkdir()
+            (repo_dir / "submod" / ".keep").write_text("x\n", encoding="utf-8")
+            subprocess.run(["git", "config", "submodule.recurse", "true"], cwd=repo_dir, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["git", "add", ".gitmodules", "submod"], cwd=repo_dir, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["git", "commit", "-m", "init"], cwd=repo_dir, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["git", "push", "-u", "origin", "master"], cwd=repo_dir, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            checkout_submodule_version(repo_dir, ("master", ""))
+
 
 if __name__ == "__main__":
     unittest.main()
