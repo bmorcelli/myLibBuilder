@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -108,6 +109,72 @@ def checkout_submodule_version(repo_path: Path, version: Tuple[str, str], repo_n
         run_git(repo_path, "checkout", commit)
 
 
+_DEPENDENCY_KEY_RE_CACHE: Dict[str, "re.Pattern[str]"] = {}
+
+
+def _dependency_key_pattern(dep_key: str) -> "re.Pattern[str]":
+    pattern = _DEPENDENCY_KEY_RE_CACHE.get(dep_key)
+    if pattern is None:
+        pattern = re.compile(r"^(?P<indent>[ \t]*)" + re.escape(dep_key) + r":[ \t]*(?P<value>.*)$")
+        _DEPENDENCY_KEY_RE_CACHE[dep_key] = pattern
+    return pattern
+
+
+_VERSION_LINE_RE = re.compile(r"^(?P<indent>[ \t]*)version:[ \t]*(?P<value>[^#]*?)[ \t]*(?P<comment>#.*)?$")
+
+
+def _set_dependency_version(lines: list, dep_key: str, version: str) -> bool:
+    """Set the pinned version for an `owner/name:` dependency in an idf_component.yml
+    style manifest, touching only that dependency's own `version:` field so unrelated
+    text elsewhere in the file (including other dependencies whose name happens to be
+    a substring match) is left untouched."""
+    key_pattern = _dependency_key_pattern(dep_key)
+    for i, line in enumerate(lines):
+        stripped = line.rstrip("\n")
+        match = key_pattern.match(stripped)
+        if not match:
+            continue
+        indent = match.group("indent")
+        inline_value = match.group("value").strip()
+        if inline_value:
+            # shorthand form: "owner/name: <constraint>"
+            new_line = f'{indent}{dep_key}: "{version}"\n'
+            if line == new_line:
+                return False
+            lines[i] = new_line
+            return True
+        # block form: the version lives on a direct child line, e.g.
+        #   owner/name:
+        #     version: "<constraint>"
+        #     rules: ...
+        # Dependencies with multiple conditional versions (a "matches:" list
+        # instead of a direct "version:" child) are intentionally left alone,
+        # since there is no single value to pin.
+        child_indent = None
+        for j in range(i + 1, len(lines)):
+            sub = lines[j].rstrip("\n")
+            if not sub.strip():
+                continue
+            sub_indent = len(sub) - len(sub.lstrip(" \t"))
+            if sub_indent <= len(indent):
+                break
+            if child_indent is None:
+                child_indent = sub_indent
+            if sub_indent != child_indent:
+                continue
+            version_match = _VERSION_LINE_RE.match(sub)
+            if version_match:
+                comment = version_match.group("comment")
+                suffix = f" {comment}" if comment else ""
+                new_sub = f'{" " * child_indent}version: "{version}"{suffix}\n'
+                if lines[j] == new_sub:
+                    return False
+                lines[j] = new_sub
+                return True
+        return False
+    return False
+
+
 def update_component_versions(repo_path: Path, versions: Dict[str, str]) -> None:
     if not repo_path.exists():
         return
@@ -119,14 +186,18 @@ def update_component_versions(repo_path: Path, versions: Dict[str, str]) -> None
     for component_file in component_files:
         if not component_file.exists():
             continue
-        text = component_file.read_text(encoding="utf-8")
-        updated = text
+        lines = component_file.read_text(encoding="utf-8").splitlines(keepends=True)
+        changed = False
         for name, version in versions.items():
-            if name in {"espressif__cbor", "espressif__cjson", "espressif__dl_fft", "espressif__esp-dsp", "espressif__esp-modbus", "espressif__esp-nn", "espressif__esp-serial-flasher", "espressif__esp-sr", "espressif__esp-tflite-micro", "espressif__esp-zboss-lib", "espressif__esp-zigbee-lib", "espressif__esp_delta_ota", "espressif__esp_diag_data_store", "espressif__esp_diagnostics", "espressif__esp_encrypted_img", "espressif__esp_insights", "espressif__esp_jpeg", "espressif__esp_matter", "espressif__esp_modem", "espressif__esp_rainmaker", "espressif__esp_rcp_update", "espressif__esp_schedule", "espressif__esp_secure_cert_mgr", "espressif__jsmn", "espressif__json_generator", "espressif__json_parser", "espressif__libsodium", "espressif__mdns", "espressif__network_provisioning", "espressif__qrcode", "espressif__rmaker_common"}:
-                if name.replace("espressif__", "") in updated:
-                    updated = updated.replace(name.replace("espressif__", ""), version)
-        if updated != text:
-            component_file.write_text(updated, encoding="utf-8")
+            if not version:
+                continue
+            if not (name.startswith("espressif__") or name.startswith("chmorgan__") or name.startswith("joltwallet__")):
+                continue
+            dep_key = name.replace("__", "/", 1)
+            if _set_dependency_version(lines, dep_key, version):
+                changed = True
+        if changed:
+            component_file.write_text("".join(lines), encoding="utf-8")
             print(f"Updated component versions in {component_file}")
 
 
