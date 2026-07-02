@@ -16,8 +16,15 @@ REPOSITORY_URLS = {
     "esp32-arduino-lib-builder": "https://github.com/espressif/esp32-arduino-lib-builder.git",
     "arduino-esp32": "https://github.com/espressif/arduino-esp32.git",
 }
+BUILDER_DIR = TMP_ROOT / "esp32-arduino-lib-builder"
 SUBMODULES = {
-    name: TMP_ROOT / name for name in REPOSITORY_URLS
+    "esp-idf": TMP_ROOT / "esp-idf",
+    "esp32-arduino-lib-builder": BUILDER_DIR,
+    # build.sh always looks for the arduino-esp32 sources at components/arduino
+    # (relative to its own cwd), so clone straight there instead of a separate
+    # temp dir: that way the checkout/patches applied by run.py are what
+    # build.sh actually compiles against.
+    "arduino-esp32": BUILDER_DIR / "components" / "arduino",
 }
 
 
@@ -189,10 +196,6 @@ def main() -> None:
     args = parser.parse_args()
 
     versions = parse_versions(VERSIONS_FILE.read_text(encoding="utf-8"))
-    for name, repo_path in SUBMODULES.items():
-        if not repo_path.exists():
-            repo_path.parent.mkdir(parents=True, exist_ok=True)
-            print(f"[prepare] repository checkout will be created at {repo_path}", flush=True)
 
     repo_versions = {
         "lib-builder": versions["repos"].get("lib-builder", ("master", "")),
