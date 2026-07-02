@@ -57,13 +57,16 @@ jobs:
   sync-assets:
     needs: pos-build
     runs-on: ubuntu-latest
-    if: ${{ secrets.LIB_BUILDER_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
       - name: Sync release assets to fork
         env:
           GH_TOKEN: ${{ secrets.LIB_BUILDER_TOKEN }}
         run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "LIB_BUILDER_TOKEN not configured; skipping sync."
+            exit 0
+          fi
           git remote add fork https://x-access-token:${GH_TOKEN}@github.com/bmorcelli/esp32-arduino-lib-builder.git || true
           git fetch fork --tags || true
           gh release list -R bmorcelli/esp32-arduino-lib-builder >/dev/null 2>&1 || true
