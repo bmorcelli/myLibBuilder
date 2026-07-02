@@ -1,0 +1,69 @@
+name: Build ESP32 Libraries
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [esp32, esp32s2, esp32s3, esp32c2, esp32c3, esp32c6, esp32h2, esp32p4, esp32p4_es, esp32c5, esp32c61]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build cmake ccache jq git wget curl libssl-dev libncurses-dev flex bison gperf python3-pip python3-serial python3-click python3-cryptography python3-future python3-pyparsing python3-pyelftools python3-venv libusb-1.0-0 libusb-1.0-0-dev libftdi1-2
+      - name: Build target
+        run: python3 run.py -t ${{ matrix.target }}
+      - name: Archive build output
+        run: |
+          mkdir -p artifacts/${{ matrix.target }}
+          find esp32-arduino-lib-builder/out -maxdepth 3 -type f | head -100 | while read f; do cp "$f" "artifacts/${{ matrix.target }}/"; done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.target }}
+          path: artifacts/${{ matrix.target }}
+
+  pos-build:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Aggregate artifacts
+        run: |
+          mkdir -p merged
+          find dist -type f | while read f; do cp "$f" merged/; done
+          tar -czf "$(date +%Y-%m-%d.%H%M%S).tar.gz" -C merged .
+      - name: Create release tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view builds >/dev/null 2>&1 || gh release create builds --title builds --notes "Automated builds"
+      - name: Upload release asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          asset_name="$(date +%Y-%m-%d.%H%M%S).tar.gz"
+          gh release upload builds "$asset_name" --clobber
+
+  sync-assets:
+    needs: pos-build
+    runs-on: ubuntu-latest
+    if: ${{ secrets.LIB_BUILDER_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sync release assets to fork
+        env:
+          GH_TOKEN: ${{ secrets.LIB_BUILDER_TOKEN }}
+        run: |
+          git remote add fork https://x-access-token:${GH_TOKEN}@github.com/bmorcelli/esp32-arduino-lib-builder.git || true
+          git fetch fork --tags || true
+          gh release list -R bmorcelli/esp32-arduino-lib-builder >/dev/null 2>&1 || true
