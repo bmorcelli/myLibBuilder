@@ -1,9 +1,9 @@
-import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
-from run import parse_versions, apply_repo_patches
+from run import parse_versions, apply_repo_patches, checkout_submodule_version
 
 
 class RunScriptTests(unittest.TestCase):
@@ -34,6 +34,19 @@ espressif__cbor: 0.6.1~4
 
             self.assertEqual(target_file.read_text(encoding="utf-8"), "hello\nworld\n")
             self.assertEqual((repo_dir / "config.txt").read_text(encoding="utf-8"), "config\n")
+
+    def test_checkout_submodule_version_raises_for_missing_commit(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_dir = Path(tmpdir)
+            subprocess.run(["git", "init"], cwd=repo_dir, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo_dir, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo_dir, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            (repo_dir / "README.md").write_text("hello\n", encoding="utf-8")
+            subprocess.run(["git", "add", "README.md"], cwd=repo_dir, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["git", "commit", "-m", "init"], cwd=repo_dir, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            with self.assertRaises(RuntimeError):
+                checkout_submodule_version(repo_dir, ("master", "deadbeef"))
 
 
 if __name__ == "__main__":

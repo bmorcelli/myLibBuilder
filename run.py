@@ -41,23 +41,34 @@ def checkout_submodule_version(repo_path: Path, version: Tuple[str, str]) -> Non
     if not repo_path.exists():
         raise FileNotFoundError(f"Submodule not found: {repo_path}")
 
-    subprocess.run(["git", "-C", str(repo_path), "fetch", "--all", "--tags", "--prune"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    remote_name = None
+    remotes = subprocess.run(["git", "-C", str(repo_path), "remote"], check=True, capture_output=True, text=True).stdout.splitlines()
+    if remotes:
+        remote_name = "upstream" if "upstream" in remotes else "origin"
+
+    if remote_name is None:
+        raise RuntimeError(f"Submodule {repo_path} has no configured remotes")
+
+    remote_url = subprocess.run(["git", "-C", str(repo_path), "remote", "get-url", remote_name], check=True, capture_output=True, text=True).stdout.strip()
+    if remote_name == "origin" and "upstream" not in remotes:
+        subprocess.run(["git", "-C", str(repo_path), "remote", "add", "upstream", remote_url], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        remote_name = "upstream"
+
+    subprocess.run(["git", "-C", str(repo_path), "fetch", remote_name, "--tags", "--prune", "--force"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    if subprocess.run(["git", "-C", str(repo_path), "rev-parse", "--is-shallow-repository"], check=True, capture_output=True, text=True).stdout.strip() == "true":
+        subprocess.run(["git", "-C", str(repo_path), "fetch", "--unshallow", remote_name, "--tags", "--prune", "--force"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     branch, commit = version
     if branch and branch != "master":
-        try:
-            subprocess.run(["git", "-C", str(repo_path), "checkout", branch], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except subprocess.CalledProcessError:
-            pass
+        subprocess.run(["git", "-C", str(repo_path), "fetch", remote_name, branch, "--force"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["git", "-C", str(repo_path), "checkout", branch], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
     if commit:
-        try:
-            subprocess.run(["git", "-C", str(repo_path), "checkout", commit], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except subprocess.CalledProcessError:
-            short_commit = commit[:12]
-            try:
-                subprocess.run(["git", "-C", str(repo_path), "checkout", short_commit], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except subprocess.CalledProcessError:
-                subprocess.run(["git", "-C", str(repo_path), "checkout", "HEAD"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        commit_check = subprocess.run(["git", "-C", str(repo_path), "rev-parse", "--verify", commit], check=False, capture_output=True, text=True)
+        if commit_check.returncode != 0:
+            raise RuntimeError(f"Commit '{commit}' was not found in {repo_path} after fetching from {remote_name}")
+        subprocess.run(["git", "-C", str(repo_path), "checkout", commit], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def update_component_versions(repo_path: Path, versions: Dict[str, str]) -> None:
