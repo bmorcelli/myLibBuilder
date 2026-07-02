@@ -1,0 +1,27 @@
+name: Sync release assets
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    secrets:
+      LIB_BUILDER_TOKEN:
+        required: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sync release assets to fork
+        env:
+          GH_TOKEN: ${{ secrets.LIB_BUILDER_TOKEN || github.token }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "No token configured; skipping sync."
+            exit 0
+          fi
+          git remote add fork https://x-access-token:${GH_TOKEN}@github.com/bmorcelli/esp32-arduino-lib-builder.git || true
+          git fetch fork --tags || true
+          gh release list -R bmorcelli/esp32-arduino-lib-builder >/dev/null 2>&1 || true

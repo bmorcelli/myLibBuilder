@@ -13,8 +13,6 @@ jobs:
         target: [esp32, esp32s2, esp32s3, esp32c2, esp32c3, esp32c6, esp32h2, esp32p4, esp32p4_es, esp32c5, esp32c61]
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
       - name: Install build deps
         run: |
           sudo apt-get update
@@ -23,8 +21,11 @@ jobs:
         run: python3 run.py -t ${{ matrix.target }}
       - name: Archive build output
         run: |
-          mkdir -p artifacts/${{ matrix.target }}
-          find esp32-arduino-lib-builder/out -maxdepth 3 -type f | head -100 | while read f; do cp "$f" "artifacts/${{ matrix.target }}/"; done
+          builder_dir="/tmp/myLibBuilder-repos/esp32-arduino-lib-builder"
+          mkdir -p "artifacts/${{ matrix.target }}"
+          if [ -d "$builder_dir/out" ]; then
+            find "$builder_dir/out" -maxdepth 3 -type f | head -100 | while read -r f; do cp "$f" "artifacts/${{ matrix.target }}/"; done
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: build-${{ matrix.target }}
@@ -56,17 +57,6 @@ jobs:
 
   sync-assets:
     needs: pos-build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Sync release assets to fork
-        env:
-          GH_TOKEN: ${{ secrets.LIB_BUILDER_TOKEN }}
-        run: |
-          if [ -z "$GH_TOKEN" ]; then
-            echo "LIB_BUILDER_TOKEN not configured; skipping sync."
-            exit 0
-          fi
-          git remote add fork https://x-access-token:${GH_TOKEN}@github.com/bmorcelli/esp32-arduino-lib-builder.git || true
-          git fetch fork --tags || true
-          gh release list -R bmorcelli/esp32-arduino-lib-builder >/dev/null 2>&1 || true
+    uses: ./.github/workflows/sync-assets.yml
+    secrets:
+      LIB_BUILDER_TOKEN: ${{ secrets.LIB_BUILDER_TOKEN }}

@@ -10,10 +10,14 @@ from typing import Dict, Tuple
 ROOT = Path(__file__).resolve().parent
 VERSIONS_FILE = ROOT / "versions.txt"
 PATCHES_ROOT = ROOT / "patches"
+TMP_ROOT = Path("/tmp/myLibBuilder-repos")
+REPOSITORY_URLS = {
+    "esp-idf": "https://github.com/espressif/esp-idf.git",
+    "esp32-arduino-lib-builder": "https://github.com/espressif/esp32-arduino-lib-builder.git",
+    "arduino-esp32": "https://github.com/espressif/arduino-esp32.git",
+}
 SUBMODULES = {
-    "esp-idf": ROOT / "esp-idf",
-    "esp32-arduino-lib-builder": ROOT / "esp32-arduino-lib-builder",
-    "arduino-esp32": ROOT / "arduino-esp32",
+    name: TMP_ROOT / name for name in REPOSITORY_URLS
 }
 
 
@@ -54,9 +58,15 @@ def run_git(repo_path: Path, *args: str, capture: bool = False, check: bool = Tr
     return result
 
 
-def checkout_submodule_version(repo_path: Path, version: Tuple[str, str]) -> None:
+def checkout_submodule_version(repo_path: Path, version: Tuple[str, str], repo_name: str | None = None) -> None:
     if not repo_path.exists():
-        raise FileNotFoundError(f"Submodule not found: {repo_path}")
+        repo_name = repo_name or repo_path.name
+        repo_url = REPOSITORY_URLS.get(repo_name)
+        if not repo_url:
+            raise FileNotFoundError(f"Repository checkout target not found: {repo_path}")
+        repo_path.parent.mkdir(parents=True, exist_ok=True)
+        print(f"[clone] {repo_url} -> {repo_path}", flush=True)
+        subprocess.run(["git", "clone", repo_url, str(repo_path)], check=True)
 
     remotes = run_git(repo_path, "remote", capture=True).stdout.splitlines()
     remote_name = None
@@ -153,7 +163,7 @@ def ensure_system_dependencies() -> None:
 def ensure_idf_environment() -> None:
     idf_dir = SUBMODULES["esp-idf"]
     if not idf_dir.exists():
-        raise FileNotFoundError(f"ESP-IDF submodule not found: {idf_dir}")
+        raise FileNotFoundError(f"ESP-IDF checkout not found: {idf_dir}")
     install_script = idf_dir / "install.sh"
     if not install_script.exists():
         raise FileNotFoundError(f"ESP-IDF install script not found: {install_script}")
@@ -163,11 +173,11 @@ def ensure_idf_environment() -> None:
 def build_target(target: str) -> None:
     builder_dir = SUBMODULES["esp32-arduino-lib-builder"]
     if not builder_dir.exists():
-        raise FileNotFoundError(f"Builder submodule not found: {builder_dir}")
+        raise FileNotFoundError(f"Builder checkout not found: {builder_dir}")
     ensure_system_dependencies()
     ensure_idf_environment()
     env = os.environ.copy()
-    env["IDF_PATH"] = str(ROOT / "esp-idf")
+    env["IDF_PATH"] = str(SUBMODULES["esp-idf"])
     env["AR_SOURCE_BRANCH"] = "master"
     env["IDF_BRANCH"] = "master"
     subprocess.run(["bash", "build.sh", "-t", target, "-b", "build"], cwd=builder_dir, check=True, env=env)
@@ -181,7 +191,8 @@ def main() -> None:
     versions = parse_versions(VERSIONS_FILE.read_text(encoding="utf-8"))
     for name, repo_path in SUBMODULES.items():
         if not repo_path.exists():
-            raise FileNotFoundError(f"Submodule missing: {repo_path}")
+            repo_path.parent.mkdir(parents=True, exist_ok=True)
+            print(f"[prepare] repository checkout will be created at {repo_path}", flush=True)
 
     repo_versions = {
         "lib-builder": versions["repos"].get("lib-builder", ("master", "")),
@@ -189,9 +200,9 @@ def main() -> None:
         "arduino": versions["repos"].get("arduino", ("master", "")),
     }
 
-    checkout_submodule_version(SUBMODULES["esp-idf"], repo_versions["esp-idf"])
-    checkout_submodule_version(SUBMODULES["esp32-arduino-lib-builder"], repo_versions["lib-builder"])
-    checkout_submodule_version(SUBMODULES["arduino-esp32"], repo_versions["arduino"])
+    checkout_submodule_version(SUBMODULES["esp-idf"], repo_versions["esp-idf"], repo_name="esp-idf")
+    checkout_submodule_version(SUBMODULES["esp32-arduino-lib-builder"], repo_versions["lib-builder"], repo_name="esp32-arduino-lib-builder")
+    checkout_submodule_version(SUBMODULES["arduino-esp32"], repo_versions["arduino"], repo_name="arduino-esp32")
 
     update_component_versions(SUBMODULES["esp-idf"], versions["components"])
     update_component_versions(SUBMODULES["arduino-esp32"], versions["components"])
