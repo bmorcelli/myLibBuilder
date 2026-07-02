@@ -57,6 +57,8 @@ jobs:
 
   sync-assets:
     needs: pos-build
+    permissions:
+      contents: write
     uses: ./.github/workflows/sync-assets.yml
     secrets:
       LIB_BUILDER_TOKEN: ${{ secrets.LIB_BUILDER_TOKEN }}
