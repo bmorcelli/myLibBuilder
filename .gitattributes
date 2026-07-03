@@ -1,0 +1,5 @@
+# Estes arquivos sao consumidos por um build Linux (bash / sdkconfig).
+# Forcar LF mesmo editando no Windows, senao o bash quebra com "$'\r': command not found".
+*.sh text eol=lf
+*.py text eol=lf
+patches/** text eol=lf

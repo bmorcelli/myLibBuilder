@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -8,16 +9,30 @@ from pathlib import Path
 from typing import Dict, Tuple
 
 ROOT = Path(__file__).resolve().parent
-VERSIONS_FILE = ROOT / "versions.txt"
+DEFAULT_VERSIONS_FILE = ROOT / "versions.txt"
 PATCHES_ROOT = ROOT / "patches"
 TMP_ROOT = Path("/tmp/myLibBuilder-repos")
 REPOSITORY_URLS = {
     "esp-idf": "https://github.com/espressif/esp-idf.git",
     "esp32-arduino-lib-builder": "https://github.com/espressif/esp32-arduino-lib-builder.git",
     "arduino-esp32": "https://github.com/espressif/arduino-esp32.git",
+    "tinyusb": "https://github.com/hathach/tinyusb.git",
 }
+BUILDER_DIR = TMP_ROOT / "esp32-arduino-lib-builder"
 SUBMODULES = {
-    name: TMP_ROOT / name for name in REPOSITORY_URLS
+    "esp-idf": TMP_ROOT / "esp-idf",
+    "esp32-arduino-lib-builder": BUILDER_DIR,
+    # build.sh always looks for the arduino-esp32 sources at components/arduino
+    # (relative to its own cwd), so clone straight there instead of a separate
+    # temp dir: that way the checkout/patches applied by run.py are what
+    # build.sh actually compiles against.
+    "arduino-esp32": BUILDER_DIR / "components" / "arduino",
+    # Same idea for TinyUSB: build.sh's tools/update-components.sh clones it to
+    # components/arduino_tinyusb/tinyusb and pulls master (unpinned). Clone it
+    # here pinned to versions.txt; the update-components.sh patch then skips the
+    # upstream pull so the pinned commit (matching the arduino-esp32 sources) is
+    # what actually compiles.
+    "tinyusb": BUILDER_DIR / "components" / "arduino_tinyusb" / "tinyusb",
 }
 
 
@@ -33,7 +48,7 @@ def parse_versions(text: str) -> Dict[str, Dict[str, object]]:
         key, value = line.split(":", 1)
         key = key.strip()
         value = value.strip()
-        if key in {"lib-builder", "esp-idf", "arduino"}:
+        if key in {"lib-builder", "esp-idf", "arduino", "tinyusb"}:
             parts = value.split()
             if len(parts) >= 2:
                 repos[key] = (parts[0], parts[1])
@@ -66,7 +81,11 @@ def checkout_submodule_version(repo_path: Path, version: Tuple[str, str], repo_n
             raise FileNotFoundError(f"Repository checkout target not found: {repo_path}")
         repo_path.parent.mkdir(parents=True, exist_ok=True)
         print(f"[clone] {repo_url} -> {repo_path}", flush=True)
-        subprocess.run(["git", "clone", repo_url, str(repo_path)], check=True)
+        # Blobless partial clone: fetch full commit/tree history (needed to resolve
+        # the pinned branch/tag/commit) but skip historical file blobs, which are
+        # what make esp-idf/.git (~3.3GB) and arduino/.git (~2.2GB) huge. Blobs for
+        # the checked-out commit are fetched lazily on demand.
+        subprocess.run(["git", "clone", "--filter=blob:none", repo_url, str(repo_path)], check=True)
 
     remotes = run_git(repo_path, "remote", capture=True).stdout.splitlines()
     remote_name = None
@@ -101,6 +120,72 @@ def checkout_submodule_version(repo_path: Path, version: Tuple[str, str], repo_n
         run_git(repo_path, "checkout", commit)
 
 
+_DEPENDENCY_KEY_RE_CACHE: Dict[str, "re.Pattern[str]"] = {}
+
+
+def _dependency_key_pattern(dep_key: str) -> "re.Pattern[str]":
+    pattern = _DEPENDENCY_KEY_RE_CACHE.get(dep_key)
+    if pattern is None:
+        pattern = re.compile(r"^(?P<indent>[ \t]*)" + re.escape(dep_key) + r":[ \t]*(?P<value>.*)$")
+        _DEPENDENCY_KEY_RE_CACHE[dep_key] = pattern
+    return pattern
+
+
+_VERSION_LINE_RE = re.compile(r"^(?P<indent>[ \t]*)version:[ \t]*(?P<value>[^#]*?)[ \t]*(?P<comment>#.*)?$")
+
+
+def _set_dependency_version(lines: list, dep_key: str, version: str) -> bool:
+    """Set the pinned version for an `owner/name:` dependency in an idf_component.yml
+    style manifest, touching only that dependency's own `version:` field so unrelated
+    text elsewhere in the file (including other dependencies whose name happens to be
+    a substring match) is left untouched."""
+    key_pattern = _dependency_key_pattern(dep_key)
+    for i, line in enumerate(lines):
+        stripped = line.rstrip("\n")
+        match = key_pattern.match(stripped)
+        if not match:
+            continue
+        indent = match.group("indent")
+        inline_value = match.group("value").strip()
+        if inline_value:
+            # shorthand form: "owner/name: <constraint>"
+            new_line = f'{indent}{dep_key}: "{version}"\n'
+            if line == new_line:
+                return False
+            lines[i] = new_line
+            return True
+        # block form: the version lives on a direct child line, e.g.
+        #   owner/name:
+        #     version: "<constraint>"
+        #     rules: ...
+        # Dependencies with multiple conditional versions (a "matches:" list
+        # instead of a direct "version:" child) are intentionally left alone,
+        # since there is no single value to pin.
+        child_indent = None
+        for j in range(i + 1, len(lines)):
+            sub = lines[j].rstrip("\n")
+            if not sub.strip():
+                continue
+            sub_indent = len(sub) - len(sub.lstrip(" \t"))
+            if sub_indent <= len(indent):
+                break
+            if child_indent is None:
+                child_indent = sub_indent
+            if sub_indent != child_indent:
+                continue
+            version_match = _VERSION_LINE_RE.match(sub)
+            if version_match:
+                comment = version_match.group("comment")
+                suffix = f" {comment}" if comment else ""
+                new_sub = f'{" " * child_indent}version: "{version}"{suffix}\n'
+                if lines[j] == new_sub:
+                    return False
+                lines[j] = new_sub
+                return True
+        return False
+    return False
+
+
 def update_component_versions(repo_path: Path, versions: Dict[str, str]) -> None:
     if not repo_path.exists():
         return
@@ -112,15 +197,30 @@ def update_component_versions(repo_path: Path, versions: Dict[str, str]) -> None
     for component_file in component_files:
         if not component_file.exists():
             continue
-        text = component_file.read_text(encoding="utf-8")
-        updated = text
+        lines = component_file.read_text(encoding="utf-8").splitlines(keepends=True)
+        changed = False
         for name, version in versions.items():
-            if name in {"espressif__cbor", "espressif__cjson", "espressif__dl_fft", "espressif__esp-dsp", "espressif__esp-modbus", "espressif__esp-nn", "espressif__esp-serial-flasher", "espressif__esp-sr", "espressif__esp-tflite-micro", "espressif__esp-zboss-lib", "espressif__esp-zigbee-lib", "espressif__esp_delta_ota", "espressif__esp_diag_data_store", "espressif__esp_diagnostics", "espressif__esp_encrypted_img", "espressif__esp_insights", "espressif__esp_jpeg", "espressif__esp_matter", "espressif__esp_modem", "espressif__esp_rainmaker", "espressif__esp_rcp_update", "espressif__esp_schedule", "espressif__esp_secure_cert_mgr", "espressif__jsmn", "espressif__json_generator", "espressif__json_parser", "espressif__libsodium", "espressif__mdns", "espressif__network_provisioning", "espressif__qrcode", "espressif__rmaker_common"}:
-                if name.replace("espressif__", "") in updated:
-                    updated = updated.replace(name.replace("espressif__", ""), version)
-        if updated != text:
-            component_file.write_text(updated, encoding="utf-8")
+            if not version:
+                continue
+            if not (name.startswith("espressif__") or name.startswith("chmorgan__") or name.startswith("joltwallet__")):
+                continue
+            dep_key = name.replace("__", "/", 1)
+            if _set_dependency_version(lines, dep_key, version):
+                changed = True
+        if changed:
+            component_file.write_text("".join(lines), encoding="utf-8")
             print(f"Updated component versions in {component_file}")
+
+
+def _normalize_newlines(data: bytes) -> bytes:
+    """Convert CRLF/CR line endings to LF for text content. Binary files
+    (detected by a NUL byte) are returned untouched. Patch files are edited on
+    Windows but consumed by a Linux build (bash scripts, sdkconfig appends), so
+    stray '\\r' bytes must never reach the build or bash breaks with
+    "$'\\r': command not found"."""
+    if b"\x00" in data:
+        return data
+    return data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
 
 
 def apply_repo_patches(repo_dir: Path, patch_dir: Path) -> None:
@@ -133,17 +233,17 @@ def apply_repo_patches(repo_dir: Path, patch_dir: Path) -> None:
         if patch_path.suffix == ".append":
             target_path = repo_dir / rel_path.with_suffix("")
             target_path.parent.mkdir(parents=True, exist_ok=True)
-            patch_content = patch_path.read_text(encoding="utf-8")
+            patch_content = _normalize_newlines(patch_path.read_bytes())
             if target_path.exists():
-                target_path.write_text(target_path.read_text(encoding="utf-8") + patch_content, encoding="utf-8")
+                target_path.write_bytes(_normalize_newlines(target_path.read_bytes()) + patch_content)
             else:
-                target_path.write_text(patch_content, encoding="utf-8")
+                target_path.write_bytes(patch_content)
         elif patch_path.suffix in {".diff", ".patch"}:
             subprocess.run(["git", "-C", str(repo_dir), "apply", str(patch_path)], check=True, stdout=subprocess.DEVNULL)
         else:
             target_path = repo_dir / rel_path
             target_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(patch_path, target_path)
+            target_path.write_bytes(_normalize_newlines(patch_path.read_bytes()))
 
 
 def ensure_system_dependencies() -> None:
@@ -180,29 +280,55 @@ def build_target(target: str) -> None:
     env["IDF_PATH"] = str(SUBMODULES["esp-idf"])
     env["AR_SOURCE_BRANCH"] = "master"
     env["IDF_BRANCH"] = "master"
-    subprocess.run(["bash", "build.sh", "-t", target, "-b", "build"], cwd=builder_dir, check=True, env=env)
+    subprocess.run(["bash", "build.sh", "-t", target, "-e"], cwd=builder_dir, check=True, env=env)
+
+
+def versions_file_for(target: str) -> Path:
+    """Return the per-target versions file (versions.<target>) when it exists,
+    otherwise fall back to the shared versions.txt."""
+    target_file = ROOT / f"versions.{target}"
+    if target_file.exists():
+        return target_file
+    return DEFAULT_VERSIONS_FILE
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build ESP32 Arduino libraries from pinned versions")
-    parser.add_argument("-t", "--target", required=True, choices=["esp32", "esp32s2", "esp32s3", "esp32c2", "esp32c3", "esp32c6", "esp32h2", "esp32p4", "esp32p4_es", "esp32c5", "esp32c61"], help="Target to build")
+    parser.add_argument("-t", "--target", choices=["esp32", "esp32s2", "esp32s3", "esp32c2", "esp32c3", "esp32c6", "esp32h2", "esp32p4", "esp32p4_es", "esp32c5", "esp32c61"], help="Target to build")
+    parser.add_argument(
+        "--install-only",
+        action="store_true",
+        help="Only checkout esp-idf and install its toolchain (~/.espressif), then exit. "
+        "Used to warm the CI cache without running a build.",
+    )
     args = parser.parse_args()
 
-    versions = parse_versions(VERSIONS_FILE.read_text(encoding="utf-8"))
-    for name, repo_path in SUBMODULES.items():
-        if not repo_path.exists():
-            repo_path.parent.mkdir(parents=True, exist_ok=True)
-            print(f"[prepare] repository checkout will be created at {repo_path}", flush=True)
+    if not args.install_only and not args.target:
+        parser.error("-t/--target is required unless --install-only is set")
+
+    versions_file = versions_file_for(args.target) if args.target else DEFAULT_VERSIONS_FILE
+    print(f"[versions] using {versions_file.name}", flush=True)
+    versions = parse_versions(versions_file.read_text(encoding="utf-8"))
 
     repo_versions = {
         "lib-builder": versions["repos"].get("lib-builder", ("master", "")),
         "esp-idf": versions["repos"].get("esp-idf", ("master", "")),
         "arduino": versions["repos"].get("arduino", ("master", "")),
+        "tinyusb": versions["repos"].get("tinyusb", ("master", "")),
     }
 
     checkout_submodule_version(SUBMODULES["esp-idf"], repo_versions["esp-idf"], repo_name="esp-idf")
+
+    if args.install_only:
+        # Toolchain (~/.espressif) is target-independent: install.sh installs the
+        # tools required by this esp-idf checkout for every target at once.
+        ensure_idf_environment()
+        print("[install-only] toolchain ready, skipping build", flush=True)
+        return
+
     checkout_submodule_version(SUBMODULES["esp32-arduino-lib-builder"], repo_versions["lib-builder"], repo_name="esp32-arduino-lib-builder")
     checkout_submodule_version(SUBMODULES["arduino-esp32"], repo_versions["arduino"], repo_name="arduino-esp32")
+    checkout_submodule_version(SUBMODULES["tinyusb"], repo_versions["tinyusb"], repo_name="tinyusb")
 
     update_component_versions(SUBMODULES["esp-idf"], versions["components"])
     update_component_versions(SUBMODULES["arduino-esp32"], versions["components"])

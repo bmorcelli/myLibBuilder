@@ -5,58 +5,104 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-libs:
+    name: Build Libs for ${{ matrix.target }}
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
-        target: [esp32, esp32s2, esp32s3, esp32c2, esp32c3, esp32c6, esp32h2, esp32p4, esp32p4_es, esp32c5, esp32c61]
+        # target: [esp32, esp32s2, esp32s3, esp32c2, esp32c3, esp32c6, esp32h2, esp32p4, esp32p4_es, esp32c5, esp32c61]
+        target: [esp32, esp32s3, esp32c3, esp32c6, esp32h2, esp32p4, esp32p4_es, esp32c5]
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Install build deps
         run: |
           sudo apt-get update
           sudo apt-get install -y ninja-build cmake ccache jq git wget curl libssl-dev libncurses-dev flex bison gperf python3-pip python3-serial python3-click python3-cryptography python3-future python3-pyparsing python3-pyelftools python3-venv libusb-1.0-0 libusb-1.0-0-dev libftdi1-2
-      - name: Build target
-        run: python3 run.py -t ${{ matrix.target }}
-      - name: Archive build output
-        run: |
-          builder_dir="/tmp/myLibBuilder-repos/esp32-arduino-lib-builder"
-          mkdir -p "artifacts/${{ matrix.target }}"
-          if [ -d "$builder_dir/out" ]; then
-            find "$builder_dir/out" -maxdepth 3 -type f | head -100 | while read -r f; do cp "$f" "artifacts/${{ matrix.target }}/"; done
-          fi
-      - uses: actions/upload-artifact@v4
-        with:
-          name: build-${{ matrix.target }}
-          path: artifacts/${{ matrix.target }}
 
-  pos-build:
-    needs: build
+      # Restore-only: the "Warm toolchain cache" workflow is the sole writer, so
+      # the 8 matrix jobs don't race to save ~1-2 GB each. On a miss the build
+      # still works (run.py's install.sh just downloads the toolchain), only slower.
+      - name: Restore ESP-IDF toolchain cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.espressif
+          key: espressif-toolchain-${{ runner.os }}-${{ hashFiles('versions.txt') }}
+          restore-keys: |
+            espressif-toolchain-${{ runner.os }}-
+
+      - name: Build Libs for ${{ matrix.target }}
+        run: python3 run.py -t ${{ matrix.target }}
+
+      - name: Upload archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-${{ matrix.target }}
+          path: /tmp/myLibBuilder-repos/esp32-arduino-lib-builder/dist
+
+  combine-artifacts:
+    name: Combine artifacts
+    needs: build-libs
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
         with:
           path: dist
-      - name: Aggregate artifacts
+          pattern: artifacts-*
+          merge-multiple: true
+
+      - name: Prepare esp32-arduino-libs archive
+        id: prepare_archive
+        shell: bash
         run: |
-          mkdir -p merged
-          find dist -type f | while read f; do cp "$f" merged/; done
-          tar -czf "$(date +%Y-%m-%d.%H%M%S).tar.gz" -C merged .
-      - name: Create release tag
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release view builds >/dev/null 2>&1 || gh release create builds --title builds --notes "Automated builds"
-      - name: Upload release asset
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          asset_name="$(date +%Y-%m-%d.%H%M%S).tar.gz"
-          gh release upload builds "$asset_name" --clobber
+          set -euo pipefail
+          mkdir -p out
+          find dist -name 'arduino-esp32-libs-esp*.tar.gz' -exec tar zxf {} -C out \;
+          timestamp=$(date '+%Y%m%d-%H%M%S')
+          branch_name="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+          # Branch names can contain '/', which would turn the archive name into a
+          # nonexistent subdirectory path (dist/claude/...) and break tar. Flatten it.
+          branch_name="${branch_name//\//-}"
+          archive_name="${branch_name}_esp32-arduino-libs-${timestamp}.tar.gz"
+          archive_path="dist/${archive_name}"
+          (
+            cd out/tools/esp32-arduino-libs
+            tar -czf "../../../${archive_path}" .
+          )
+          cp out/package_esp32_index.template.json dist/package_esp32_index.template.json
+          echo "archive_name=${archive_name}" >> "${GITHUB_OUTPUT}"
+          echo "archive_path=${archive_path}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload full esp32-arduino-libs archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32-arduino-libs
+          path: ${{ steps.prepare_archive.outputs.archive_path }}
+
+      - name: Upload package_esp32_index.template.json
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-esp32-index-json
+          path: dist/package_esp32_index.template.json
+
+      - name: Upload archive to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: builds
+          files: |
+            ${{ steps.prepare_archive.outputs.archive_path }}
+            dist/package_esp32_index.template.json
 
   sync-assets:
-    needs: pos-build
+    needs: combine-artifacts
     permissions:
       contents: write
     uses: ./.github/workflows/sync-assets.yml
