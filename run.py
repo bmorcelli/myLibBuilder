@@ -81,7 +81,11 @@ def checkout_submodule_version(repo_path: Path, version: Tuple[str, str], repo_n
             raise FileNotFoundError(f"Repository checkout target not found: {repo_path}")
         repo_path.parent.mkdir(parents=True, exist_ok=True)
         print(f"[clone] {repo_url} -> {repo_path}", flush=True)
-        subprocess.run(["git", "clone", repo_url, str(repo_path)], check=True)
+        # Blobless partial clone: fetch full commit/tree history (needed to resolve
+        # the pinned branch/tag/commit) but skip historical file blobs, which are
+        # what make esp-idf/.git (~3.3GB) and arduino/.git (~2.2GB) huge. Blobs for
+        # the checked-out commit are fetched lazily on demand.
+        subprocess.run(["git", "clone", "--filter=blob:none", repo_url, str(repo_path)], check=True)
 
     remotes = run_git(repo_path, "remote", capture=True).stdout.splitlines()
     remote_name = None
@@ -290,10 +294,19 @@ def versions_file_for(target: str) -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build ESP32 Arduino libraries from pinned versions")
-    parser.add_argument("-t", "--target", required=True, choices=["esp32", "esp32s2", "esp32s3", "esp32c2", "esp32c3", "esp32c6", "esp32h2", "esp32p4", "esp32p4_es", "esp32c5", "esp32c61"], help="Target to build")
+    parser.add_argument("-t", "--target", choices=["esp32", "esp32s2", "esp32s3", "esp32c2", "esp32c3", "esp32c6", "esp32h2", "esp32p4", "esp32p4_es", "esp32c5", "esp32c61"], help="Target to build")
+    parser.add_argument(
+        "--install-only",
+        action="store_true",
+        help="Only checkout esp-idf and install its toolchain (~/.espressif), then exit. "
+        "Used to warm the CI cache without running a build.",
+    )
     args = parser.parse_args()
 
-    versions_file = versions_file_for(args.target)
+    if not args.install_only and not args.target:
+        parser.error("-t/--target is required unless --install-only is set")
+
+    versions_file = versions_file_for(args.target) if args.target else DEFAULT_VERSIONS_FILE
     print(f"[versions] using {versions_file.name}", flush=True)
     versions = parse_versions(versions_file.read_text(encoding="utf-8"))
 
@@ -305,6 +318,14 @@ def main() -> None:
     }
 
     checkout_submodule_version(SUBMODULES["esp-idf"], repo_versions["esp-idf"], repo_name="esp-idf")
+
+    if args.install_only:
+        # Toolchain (~/.espressif) is target-independent: install.sh installs the
+        # tools required by this esp-idf checkout for every target at once.
+        ensure_idf_environment()
+        print("[install-only] toolchain ready, skipping build", flush=True)
+        return
+
     checkout_submodule_version(SUBMODULES["esp32-arduino-lib-builder"], repo_versions["lib-builder"], repo_name="esp32-arduino-lib-builder")
     checkout_submodule_version(SUBMODULES["arduino-esp32"], repo_versions["arduino"], repo_name="arduino-esp32")
     checkout_submodule_version(SUBMODULES["tinyusb"], repo_versions["tinyusb"], repo_name="tinyusb")

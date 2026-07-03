@@ -22,6 +22,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ninja-build cmake ccache jq git wget curl libssl-dev libncurses-dev flex bison gperf python3-pip python3-serial python3-click python3-cryptography python3-future python3-pyparsing python3-pyelftools python3-venv libusb-1.0-0 libusb-1.0-0-dev libftdi1-2
 
+      # Restore-only: the "Warm toolchain cache" workflow is the sole writer, so
+      # the 8 matrix jobs don't race to save ~1-2 GB each. On a miss the build
+      # still works (run.py's install.sh just downloads the toolchain), only slower.
+      - name: Restore ESP-IDF toolchain cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.espressif
+          key: espressif-toolchain-${{ runner.os }}-${{ hashFiles('versions.txt') }}
+          restore-keys: |
+            espressif-toolchain-${{ runner.os }}-
+
       - name: Build Libs for ${{ matrix.target }}
         run: python3 run.py -t ${{ matrix.target }}
 
@@ -54,9 +65,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p out
-          find dist -name 'arduino-esp32-libs-esp*.tar.gz' -exec tar zxvf {} -C out \;
+          find dist -name 'arduino-esp32-libs-esp*.tar.gz' -exec tar zxf {} -C out \;
           timestamp=$(date '+%Y%m%d-%H%M%S')
           branch_name="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+          # Branch names can contain '/', which would turn the archive name into a
+          # nonexistent subdirectory path (dist/claude/...) and break tar. Flatten it.
+          branch_name="${branch_name//\//-}"
           archive_name="${branch_name}_esp32-arduino-libs-${timestamp}.tar.gz"
           archive_path="dist/${archive_name}"
           (

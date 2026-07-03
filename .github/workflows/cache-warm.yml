@@ -1,0 +1,33 @@
+name: Warm toolchain cache
+
+# Run this manually (Actions tab -> "Warm toolchain cache" -> Run workflow)
+# to populate the ~/.espressif toolchain cache. push.yml then restores it, so
+# each target build skips re-downloading the ESP-IDF toolchain (~1-2 GB, the
+# slowest network step). The cache is keyed on versions.txt, so re-run this
+# whenever the esp-idf version changes.
+on:
+  workflow_dispatch:
+
+jobs:
+  warm-cache:
+    name: Warm ~/.espressif cache
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build cmake ccache jq git wget curl libssl-dev libncurses-dev flex bison gperf python3-pip python3-serial python3-click python3-cryptography python3-future python3-pyparsing python3-pyelftools python3-venv libusb-1.0-0 libusb-1.0-0-dev libftdi1-2
+
+      - name: Toolchain cache
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.espressif
+          key: espressif-toolchain-${{ runner.os }}-${{ hashFiles('versions.txt') }}
+
+      - name: Install ESP-IDF toolchain
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: python3 run.py --install-only
