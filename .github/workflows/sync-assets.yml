@@ -7,21 +7,58 @@ on:
       LIB_BUILDER_TOKEN:
         required: false
 
+env:
+  SOURCE_REPO: ${{ github.repository }}
+  TARGET_REPO: bmorcelli/esp32-arduino-lib-builder
+  RELEASE_TAG: builds
+
 jobs:
   sync:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - name: Sync release assets to fork
+      - name: Sync "builds" release assets to fork
         env:
-          GH_TOKEN: ${{ secrets.LIB_BUILDER_TOKEN || github.token }}
+          # Needs read access to SOURCE_REPO and write access to TARGET_REPO.
+          # github.token can't write to the fork, so a PAT (LIB_BUILDER_TOKEN)
+          # is required for the sync to actually run.
+          GH_TOKEN: ${{ secrets.LIB_BUILDER_TOKEN }}
         run: |
-          if [ -z "$GH_TOKEN" ]; then
-            echo "No token configured; skipping sync."
+          set -euo pipefail
+
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::warning::LIB_BUILDER_TOKEN not configured; skipping sync."
             exit 0
           fi
-          git remote add fork https://x-access-token:${GH_TOKEN}@github.com/bmorcelli/esp32-arduino-lib-builder.git || true
-          git fetch fork --tags || true
-          gh release list -R bmorcelli/esp32-arduino-lib-builder >/dev/null 2>&1 || true
+
+          workdir="$(mktemp -d)"
+          echo "Downloading assets from ${SOURCE_REPO}@${RELEASE_TAG} ..."
+          gh release download "${RELEASE_TAG}" \
+            --repo "${SOURCE_REPO}" \
+            --dir "${workdir}" \
+            --clobber
+
+          if [ -z "$(ls -A "${workdir}")" ]; then
+            echo "::error::No assets found on ${SOURCE_REPO}@${RELEASE_TAG}."
+            exit 1
+          fi
+
+          echo "Assets to upload:"
+          ls -la "${workdir}"
+
+          # Make sure the target release exists before uploading.
+          if ! gh release view "${RELEASE_TAG}" --repo "${TARGET_REPO}" >/dev/null 2>&1; then
+            echo "Creating release ${RELEASE_TAG} on ${TARGET_REPO} ..."
+            gh release create "${RELEASE_TAG}" \
+              --repo "${TARGET_REPO}" \
+              --title "${RELEASE_TAG}" \
+              --notes "Automated build artifacts synced from ${SOURCE_REPO}."
+          fi
+
+          echo "Uploading assets to ${TARGET_REPO}@${RELEASE_TAG} ..."
+          gh release upload "${RELEASE_TAG}" "${workdir}"/* \
+            --repo "${TARGET_REPO}" \
+            --clobber
+
+          echo "Sync complete."
