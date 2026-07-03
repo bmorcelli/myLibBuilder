@@ -9,13 +9,14 @@ from pathlib import Path
 from typing import Dict, Tuple
 
 ROOT = Path(__file__).resolve().parent
-VERSIONS_FILE = ROOT / "versions.txt"
+DEFAULT_VERSIONS_FILE = ROOT / "versions.txt"
 PATCHES_ROOT = ROOT / "patches"
 TMP_ROOT = Path("/tmp/myLibBuilder-repos")
 REPOSITORY_URLS = {
     "esp-idf": "https://github.com/espressif/esp-idf.git",
     "esp32-arduino-lib-builder": "https://github.com/espressif/esp32-arduino-lib-builder.git",
     "arduino-esp32": "https://github.com/espressif/arduino-esp32.git",
+    "tinyusb": "https://github.com/hathach/tinyusb.git",
 }
 BUILDER_DIR = TMP_ROOT / "esp32-arduino-lib-builder"
 SUBMODULES = {
@@ -26,6 +27,12 @@ SUBMODULES = {
     # temp dir: that way the checkout/patches applied by run.py are what
     # build.sh actually compiles against.
     "arduino-esp32": BUILDER_DIR / "components" / "arduino",
+    # Same idea for TinyUSB: build.sh's tools/update-components.sh clones it to
+    # components/arduino_tinyusb/tinyusb and pulls master (unpinned). Clone it
+    # here pinned to versions.txt; the update-components.sh patch then skips the
+    # upstream pull so the pinned commit (matching the arduino-esp32 sources) is
+    # what actually compiles.
+    "tinyusb": BUILDER_DIR / "components" / "arduino_tinyusb" / "tinyusb",
 }
 
 
@@ -41,7 +48,7 @@ def parse_versions(text: str) -> Dict[str, Dict[str, object]]:
         key, value = line.split(":", 1)
         key = key.strip()
         value = value.strip()
-        if key in {"lib-builder", "esp-idf", "arduino"}:
+        if key in {"lib-builder", "esp-idf", "arduino", "tinyusb"}:
             parts = value.split()
             if len(parts) >= 2:
                 repos[key] = (parts[0], parts[1])
@@ -272,22 +279,35 @@ def build_target(target: str) -> None:
     subprocess.run(["bash", "build.sh", "-t", target, "-e"], cwd=builder_dir, check=True, env=env)
 
 
+def versions_file_for(target: str) -> Path:
+    """Return the per-target versions file (versions.<target>) when it exists,
+    otherwise fall back to the shared versions.txt."""
+    target_file = ROOT / f"versions.{target}"
+    if target_file.exists():
+        return target_file
+    return DEFAULT_VERSIONS_FILE
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build ESP32 Arduino libraries from pinned versions")
     parser.add_argument("-t", "--target", required=True, choices=["esp32", "esp32s2", "esp32s3", "esp32c2", "esp32c3", "esp32c6", "esp32h2", "esp32p4", "esp32p4_es", "esp32c5", "esp32c61"], help="Target to build")
     args = parser.parse_args()
 
-    versions = parse_versions(VERSIONS_FILE.read_text(encoding="utf-8"))
+    versions_file = versions_file_for(args.target)
+    print(f"[versions] using {versions_file.name}", flush=True)
+    versions = parse_versions(versions_file.read_text(encoding="utf-8"))
 
     repo_versions = {
         "lib-builder": versions["repos"].get("lib-builder", ("master", "")),
         "esp-idf": versions["repos"].get("esp-idf", ("master", "")),
         "arduino": versions["repos"].get("arduino", ("master", "")),
+        "tinyusb": versions["repos"].get("tinyusb", ("master", "")),
     }
 
     checkout_submodule_version(SUBMODULES["esp-idf"], repo_versions["esp-idf"], repo_name="esp-idf")
     checkout_submodule_version(SUBMODULES["esp32-arduino-lib-builder"], repo_versions["lib-builder"], repo_name="esp32-arduino-lib-builder")
     checkout_submodule_version(SUBMODULES["arduino-esp32"], repo_versions["arduino"], repo_name="arduino-esp32")
+    checkout_submodule_version(SUBMODULES["tinyusb"], repo_versions["tinyusb"], repo_name="tinyusb")
 
     update_component_versions(SUBMODULES["esp-idf"], versions["components"])
     update_component_versions(SUBMODULES["arduino-esp32"], versions["components"])
