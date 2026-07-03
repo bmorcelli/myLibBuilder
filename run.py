@@ -201,6 +201,17 @@ def update_component_versions(repo_path: Path, versions: Dict[str, str]) -> None
             print(f"Updated component versions in {component_file}")
 
 
+def _normalize_newlines(data: bytes) -> bytes:
+    """Convert CRLF/CR line endings to LF for text content. Binary files
+    (detected by a NUL byte) are returned untouched. Patch files are edited on
+    Windows but consumed by a Linux build (bash scripts, sdkconfig appends), so
+    stray '\\r' bytes must never reach the build or bash breaks with
+    "$'\\r': command not found"."""
+    if b"\x00" in data:
+        return data
+    return data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+
+
 def apply_repo_patches(repo_dir: Path, patch_dir: Path) -> None:
     if not patch_dir.exists():
         return
@@ -211,17 +222,17 @@ def apply_repo_patches(repo_dir: Path, patch_dir: Path) -> None:
         if patch_path.suffix == ".append":
             target_path = repo_dir / rel_path.with_suffix("")
             target_path.parent.mkdir(parents=True, exist_ok=True)
-            patch_content = patch_path.read_text(encoding="utf-8")
+            patch_content = _normalize_newlines(patch_path.read_bytes())
             if target_path.exists():
-                target_path.write_text(target_path.read_text(encoding="utf-8") + patch_content, encoding="utf-8")
+                target_path.write_bytes(_normalize_newlines(target_path.read_bytes()) + patch_content)
             else:
-                target_path.write_text(patch_content, encoding="utf-8")
+                target_path.write_bytes(patch_content)
         elif patch_path.suffix in {".diff", ".patch"}:
             subprocess.run(["git", "-C", str(repo_dir), "apply", str(patch_path)], check=True, stdout=subprocess.DEVNULL)
         else:
             target_path = repo_dir / rel_path
             target_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(patch_path, target_path)
+            target_path.write_bytes(_normalize_newlines(patch_path.read_bytes()))
 
 
 def ensure_system_dependencies() -> None:
