@@ -1,18 +1,137 @@
 name: Build ESP32 Libraries
 
 on:
-  push:
   workflow_dispatch:
+    inputs:
+      build_mode:
+        description: Build all available targets or only selected targets
+        type: choice
+        required: true
+        default: all
+        options:
+          - all
+          - selected
+      esp32:
+        description: Include esp32 when build_mode=selected
+        type: boolean
+        required: false
+        default: false
+      esp32s3:
+        description: Include esp32s3 when build_mode=selected
+        type: boolean
+        required: false
+        default: false
+      esp32s2:
+        description: Include esp32s2 when build_mode=selected
+        type: boolean
+        required: false
+        default: false
+      esp32c2:
+        description: Include esp32c2 when build_mode=selected
+        type: boolean
+        required: false
+        default: false
+      esp32c3:
+        description: Include esp32c3 when build_mode=selected
+        type: boolean
+        required: false
+        default: false
+      esp32c6:
+        description: Include esp32c6 when build_mode=selected
+        type: boolean
+        required: false
+        default: false
+      esp32h2:
+        description: Include esp32h2 when build_mode=selected
+        type: boolean
+        required: false
+        default: false
+      esp32p4:
+        description: Include esp32p4 when build_mode=selected
+        type: boolean
+        required: false
+        default: false
+      esp32p4_es:
+        description: Include esp32p4_es when build_mode=selected
+        type: boolean
+        required: false
+        default: false
+      esp32c5:
+        description: Include esp32c5 when build_mode=selected
+        type: boolean
+        required: false
+        default: false
+      esp32c61:
+        description: Include esp32c61 when build_mode=selected
+        type: boolean
+        required: false
+        default: false
 
 jobs:
+  prepare-matrix:
+    name: Prepare build matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Select targets
+        id: matrix
+        env:
+          BUILD_MODE: ${{ inputs.build_mode }}
+          AVAILABLE_TARGETS: esp32,esp32s2,esp32s3,esp32c2,esp32c3,esp32c6,esp32h2,esp32p4,esp32p4_es,esp32c5,esp32c61
+          TARGET_ESP32: ${{ inputs.esp32 }}
+          TARGET_ESP32S2: ${{ inputs.esp32s2 }}
+          TARGET_ESP32S3: ${{ inputs.esp32s3 }}
+          TARGET_ESP32C2: ${{ inputs.esp32c2 }}
+          TARGET_ESP32C3: ${{ inputs.esp32c3 }}
+          TARGET_ESP32C6: ${{ inputs.esp32c6 }}
+          TARGET_ESP32H2: ${{ inputs.esp32h2 }}
+          TARGET_ESP32P4: ${{ inputs.esp32p4 }}
+          TARGET_ESP32P4_ES: ${{ inputs.esp32p4_es }}
+          TARGET_ESP32C5: ${{ inputs.esp32c5 }}
+          TARGET_ESP32C61: ${{ inputs.esp32c61 }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          available = [target.strip() for target in os.environ["AVAILABLE_TARGETS"].split(",") if target.strip()]
+          mode = os.environ["BUILD_MODE"]
+          selected_inputs = {
+              "esp32": os.environ["TARGET_ESP32"],
+              "esp32s2": os.environ["TARGET_ESP32S2"],
+              "esp32s3": os.environ["TARGET_ESP32S3"],
+              "esp32c2": os.environ["TARGET_ESP32C2"],
+              "esp32c3": os.environ["TARGET_ESP32C3"],
+              "esp32c6": os.environ["TARGET_ESP32C6"],
+              "esp32h2": os.environ["TARGET_ESP32H2"],
+              "esp32p4": os.environ["TARGET_ESP32P4"],
+              "esp32p4_es": os.environ["TARGET_ESP32P4_ES"],
+              "esp32c5": os.environ["TARGET_ESP32C5"],
+              "esp32c61": os.environ["TARGET_ESP32C61"],
+          }
+
+          if mode == "all":
+              selected = available
+          else:
+              selected = [target for target in available if selected_inputs[target].lower() == "true"]
+
+              if not selected:
+                  print("At least one target must be selected when build_mode=selected.", file=sys.stderr)
+                  sys.exit(1)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"matrix={json.dumps({'target': selected})}\n")
+          PY
+
   build-libs:
     name: Build Libs for ${{ matrix.target }}
+    needs: [prepare-matrix, prepare-sources]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
-      matrix:
-        # target: [esp32, esp32s2, esp32s3, esp32c2, esp32c3, esp32c6, esp32h2, esp32p4, esp32p4_es, esp32c5, esp32c61]
-        target: [esp32, esp32s3, esp32c3, esp32c6, esp32h2, esp32p4, esp32p4_es, esp32c5]
+      matrix: ${{ fromJSON(needs.prepare-matrix.outputs.matrix) }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -20,7 +139,7 @@ jobs:
       - name: Install build deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build cmake ccache jq git wget curl libssl-dev libncurses-dev flex bison gperf python3-pip python3-serial python3-click python3-cryptography python3-future python3-pyparsing python3-pyelftools python3-venv libusb-1.0-0 libusb-1.0-0-dev libftdi1-2
+          sudo apt-get install -y ninja-build cmake jq git wget curl libssl-dev libncurses-dev flex bison gperf python3-pip python3-serial python3-click python3-cryptography python3-future python3-pyparsing python3-pyelftools python3-venv libusb-1.0-0 libusb-1.0-0-dev libftdi1-2
 
       # Restore-only: the "Warm toolchain cache" workflow is the sole writer, so
       # the 8 matrix jobs don't race to save ~1-2 GB each. On a miss the build
@@ -33,14 +152,71 @@ jobs:
           restore-keys: |
             espressif-toolchain-${{ runner.os }}-
 
+      - name: Download prepared sources
+        uses: actions/download-artifact@v4
+        with:
+          name: prepared-sources
+          path: .
+
+      - name: Extract prepared sources
+        run: tar -xzf prepared-sources.tar.gz
+
       - name: Build Libs for ${{ matrix.target }}
-        run: python3 run.py -t ${{ matrix.target }}
+        run: python3 run.py --build-only -t ${{ matrix.target }}
 
       - name: Upload archive
         uses: actions/upload-artifact@v4
         with:
           name: artifacts-${{ matrix.target }}
-          path: /tmp/myLibBuilder-repos/esp32-arduino-lib-builder/dist
+          # path: /tmp/myLibBuilder-repos/esp32-arduino-lib-builder/dist
+          path: build/esp32-arduino-lib-builder/dist
+
+  prepare-sources:
+    name: Prepare sources
+    needs: prepare-matrix
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare pinned source tree
+        run: python3 run.py --prepare-only
+
+      - name: Pack prepared sources
+        run: tar -czf prepared-sources.tar.gz build
+
+      - name: Upload prepared sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: prepared-sources
+          path: prepared-sources.tar.gz
+          retention-days: 1
+
+  cleanup-prepared-sources:
+    name: Delete prepared sources artifact
+    needs: [prepare-sources, build-libs]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Delete prepared-sources artifact
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId,
+            });
+
+            for (const artifact of artifacts.filter((artifact) => artifact.name === 'prepared-sources')) {
+              await github.rest.actions.deleteArtifact({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                artifact_id: artifact.id,
+              });
+            }
 
   combine-artifacts:
     name: Combine artifacts

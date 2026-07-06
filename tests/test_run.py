@@ -2,8 +2,10 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from run import parse_versions, apply_repo_patches, checkout_submodule_version
+import run
+from run import parse_versions, apply_repo_patches, checkout_submodule_version, build_target
 
 
 class RunScriptTests(unittest.TestCase):
@@ -69,6 +71,38 @@ espressif__cbor: 0.6.1~4
             subprocess.run(["git", "push", "-u", "origin", "master"], cwd=repo_dir, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
             checkout_submodule_version(repo_dir, ("master", ""))
+
+    def test_build_target_passes_target_to_build_sh(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            builder_dir = Path(tmpdir)
+            submodules = dict(run.SUBMODULES)
+            submodules["esp32-arduino-lib-builder"] = builder_dir
+            submodules["esp-idf"] = builder_dir / "esp-idf"
+
+            with mock.patch.object(run, "SUBMODULES", submodules), \
+                 mock.patch.object(run, "ensure_system_dependencies"), \
+                 mock.patch.object(run, "ensure_idf_environment"), \
+                 mock.patch.object(run.subprocess, "run") as subprocess_run:
+                build_target("esp32")
+
+            subprocess_run.assert_called_once()
+            self.assertEqual(subprocess_run.call_args.args[0], ["bash", "build.sh", "-t", "esp32", "-s", "-e"])
+
+    def test_build_target_without_target_lets_build_sh_build_all_envs(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            builder_dir = Path(tmpdir)
+            submodules = dict(run.SUBMODULES)
+            submodules["esp32-arduino-lib-builder"] = builder_dir
+            submodules["esp-idf"] = builder_dir / "esp-idf"
+
+            with mock.patch.object(run, "SUBMODULES", submodules), \
+                 mock.patch.object(run, "ensure_system_dependencies"), \
+                 mock.patch.object(run, "ensure_idf_environment"), \
+                 mock.patch.object(run.subprocess, "run") as subprocess_run:
+                build_target()
+
+            subprocess_run.assert_called_once()
+            self.assertEqual(subprocess_run.call_args.args[0], ["bash", "build.sh", "-s", "-e"])
 
 
 if __name__ == "__main__":

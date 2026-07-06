@@ -11,7 +11,8 @@ from typing import Dict, Tuple
 ROOT = Path(__file__).resolve().parent
 DEFAULT_VERSIONS_FILE = ROOT / "versions.txt"
 PATCHES_ROOT = ROOT / "patches"
-TMP_ROOT = Path("/tmp/myLibBuilder-repos")
+TMP_ROOT = Path(os.environ.get("MYLIBBUILDER_ROOT", ROOT / "build"))
+TARGETS = ["esp32", "esp32s2", "esp32s3", "esp32c2", "esp32c3", "esp32c6", "esp32h2", "esp32p4", "esp32p4_es", "esp32c5", "esp32c61"]
 REPOSITORY_URLS = {
     "esp-idf": "https://github.com/espressif/esp-idf.git",
     "esp32-arduino-lib-builder": "https://github.com/espressif/esp32-arduino-lib-builder.git",
@@ -118,6 +119,17 @@ def checkout_submodule_version(repo_path: Path, version: Tuple[str, str], repo_n
         if commit_check.returncode != 0:
             raise RuntimeError(f"Commit '{commit}' was not found in {repo_path} after fetching from {remote_name}")
         run_git(repo_path, "checkout", commit)
+
+
+def materialize_git_submodules(repo_path: Path) -> None:
+    """Download git submodules for a prepared checkout before it is archived for CI jobs."""
+    if not (repo_path / ".git").exists():
+        return
+    gitmodules = repo_path / ".gitmodules"
+    if not gitmodules.exists():
+        return
+    run_git(repo_path, "submodule", "sync", "--recursive")
+    run_git(repo_path, "submodule", "update", "--init", "--recursive")
 
 
 _DEPENDENCY_KEY_RE_CACHE: Dict[str, "re.Pattern[str]"] = {}
@@ -270,7 +282,15 @@ def ensure_idf_environment() -> None:
     subprocess.run(["bash", str(install_script)], cwd=idf_dir, check=True)
 
 
-def build_target(target: str) -> None:
+def enable_local_ccache(env: Dict[str, str]) -> None:
+    if os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
+        return
+    if shutil.which("ccache") is None:
+        return
+    env.setdefault("IDF_CCACHE_ENABLE", "1")
+
+
+def build_target(target: str | None = None) -> None:
     builder_dir = SUBMODULES["esp32-arduino-lib-builder"]
     if not builder_dir.exists():
         raise FileNotFoundError(f"Builder checkout not found: {builder_dir}")
@@ -280,7 +300,11 @@ def build_target(target: str) -> None:
     env["IDF_PATH"] = str(SUBMODULES["esp-idf"])
     env["AR_SOURCE_BRANCH"] = "master"
     env["IDF_BRANCH"] = "master"
-    subprocess.run(["bash", "build.sh", "-t", target, "-e"], cwd=builder_dir, check=True, env=env)
+    enable_local_ccache(env)
+    cmd = ["bash", "build.sh", "-s", "-e"]
+    if target:
+        cmd[2:2] = ["-t", target]
+    subprocess.run(cmd, cwd=builder_dir, check=True, env=env)
 
 
 def versions_file_for(target: str) -> Path:
@@ -292,24 +316,18 @@ def versions_file_for(target: str) -> Path:
     return DEFAULT_VERSIONS_FILE
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Build ESP32 Arduino libraries from pinned versions")
-    parser.add_argument("-t", "--target", choices=["esp32", "esp32s2", "esp32s3", "esp32c2", "esp32c3", "esp32c6", "esp32h2", "esp32p4", "esp32p4_es", "esp32c5", "esp32c61"], help="Target to build")
-    parser.add_argument(
-        "--install-only",
-        action="store_true",
-        help="Only checkout esp-idf and install its toolchain (~/.espressif), then exit. "
-        "Used to warm the CI cache without running a build.",
-    )
-    args = parser.parse_args()
+def confirm_build_all_targets() -> None:
+    targets = ", ".join(TARGETS)
+    print("[confirm] nenhum target foi informado.", flush=True)
+    print(f"[confirm] O build.sh sera executado sem -t e fara o build sequencial de todos os targets disponiveis: {targets}.", flush=True)
+    print("[confirm] Isso pode demorar muito.", flush=True)
+    answer = input("Digite 'sim' para confirmar e continuar: ").strip().lower()
+    if answer not in {"sim", "s"}:
+        print("[confirm] build cancelado.", flush=True)
+        sys.exit(1)
 
-    if not args.install_only and not args.target:
-        parser.error("-t/--target is required unless --install-only is set")
 
-    versions_file = versions_file_for(args.target) if args.target else DEFAULT_VERSIONS_FILE
-    print(f"[versions] using {versions_file.name}", flush=True)
-    versions = parse_versions(versions_file.read_text(encoding="utf-8"))
-
+def prepare_sources(versions: Dict[str, Dict[str, object]]) -> None:
     repo_versions = {
         "lib-builder": versions["repos"].get("lib-builder", ("master", "")),
         "esp-idf": versions["repos"].get("esp-idf", ("master", "")),
@@ -318,14 +336,6 @@ def main() -> None:
     }
 
     checkout_submodule_version(SUBMODULES["esp-idf"], repo_versions["esp-idf"], repo_name="esp-idf")
-
-    if args.install_only:
-        # Toolchain (~/.espressif) is target-independent: install.sh installs the
-        # tools required by this esp-idf checkout for every target at once.
-        ensure_idf_environment()
-        print("[install-only] toolchain ready, skipping build", flush=True)
-        return
-
     checkout_submodule_version(SUBMODULES["esp32-arduino-lib-builder"], repo_versions["lib-builder"], repo_name="esp32-arduino-lib-builder")
     checkout_submodule_version(SUBMODULES["arduino-esp32"], repo_versions["arduino"], repo_name="arduino-esp32")
     checkout_submodule_version(SUBMODULES["tinyusb"], repo_versions["tinyusb"], repo_name="tinyusb")
@@ -336,6 +346,60 @@ def main() -> None:
     for repo_name, patch_dir_name in [("esp-idf", "esp-idf"), ("arduino-esp32", "arduino-esp32"), ("esp32-arduino-lib-builder", "esp32-arduino-lib-builder")]:
         patch_dir = PATCHES_ROOT / patch_dir_name
         apply_repo_patches(SUBMODULES[repo_name], patch_dir)
+
+    for repo_path in SUBMODULES.values():
+        materialize_git_submodules(repo_path)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Build ESP32 Arduino libraries from pinned versions")
+    parser.add_argument("-t", "--target", choices=TARGETS, help="Target to build")
+    parser.add_argument(
+        "--install-only",
+        action="store_true",
+        help="Only checkout esp-idf and install its toolchain (~/.espressif), then exit. "
+        "Used to warm the CI cache without running a build.",
+    )
+    parser.add_argument(
+        "--prepare-only",
+        action="store_true",
+        help="Only checkout pinned repositories, apply component versions/patches, download git submodules, then exit.",
+    )
+    parser.add_argument(
+        "--build-only",
+        action="store_true",
+        help="Skip repository checkout/patch preparation and build from an already prepared source tree.",
+    )
+    args = parser.parse_args()
+
+    selected_modes = sum(1 for mode in [args.install_only, args.prepare_only, args.build_only] if mode)
+    if selected_modes > 1:
+        parser.error("--install-only, --prepare-only and --build-only cannot be combined")
+
+    if not args.install_only and not args.prepare_only and not args.target:
+        confirm_build_all_targets()
+
+    versions_file = versions_file_for(args.target) if args.target else DEFAULT_VERSIONS_FILE
+    print(f"[versions] using {versions_file.name}", flush=True)
+    versions = parse_versions(versions_file.read_text(encoding="utf-8"))
+
+    if args.install_only:
+        repo_versions = {
+            "esp-idf": versions["repos"].get("esp-idf", ("master", "")),
+        }
+        checkout_submodule_version(SUBMODULES["esp-idf"], repo_versions["esp-idf"], repo_name="esp-idf")
+        # Toolchain (~/.espressif) is target-independent: install.sh installs the
+        # tools required by this esp-idf checkout for every target at once.
+        ensure_idf_environment()
+        print("[install-only] toolchain ready, skipping build", flush=True)
+        return
+
+    if not args.build_only:
+        prepare_sources(versions)
+
+    if args.prepare_only:
+        print("[prepare-only] sources ready, skipping build", flush=True)
+        return
 
     build_target(args.target)
 
