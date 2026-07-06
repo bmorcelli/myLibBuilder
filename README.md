@@ -39,7 +39,7 @@ O workflow `.github/workflows/push.yml` executa a seguinte automação manualmen
 
 ### build-libs
 * Permitir escolher entre compilar todos os targets disponiveis no matrix ou selecionar no minimo 1 target para compilar
-* Preparar uma unica vez os checkouts pinados em `build/`, aplicar patches, baixar git submodules e pré-baixar `managed_components` dos targets selecionados antes de criar o artifact temporario `prepared-sources`
+* Preparar uma unica vez os checkouts pinados em `build/`, aplicar patches e baixar git submodules antes de criar o artifact temporario `prepared-sources`
 * Rodar `run.py --build-only -t {target}` para cada target selecionado em paralelo (matrix): `esp32, esp32s2, esp32s3, esp32c2, esp32c3, esp32c6, esp32h2, esp32p4, esp32p4_es, esp32c5, esp32c61`
 * Rodar `run.py --prepare-only` para fazer download dos repositórios e dos componentes para preparar o CI/CD
 * Fazer upload do conteúdo de `dist/` (o `arduino-esp32-libs-{target}-{idf_version}.tar.gz` gerado pelo `build.sh -e`, igual ao que o `esp32-arduino-lib-builder` gera na própria CI) como artifact `artifacts-{target}`
@@ -55,4 +55,3 @@ O workflow `.github/workflows/push.yml` executa a seguinte automação manualmen
 ## Workflow de sincronizacao
 * Sincronizar os assets da release tag `builds` deste projeto com a tag `builds` do meu fork `bmorcelli/esp32-arduino-lib-builder`, usando o token LIB_BUILDER_TOKEN salvo no Secrets do repositório.
 * a fonte é este repositório, o `bmorcelli/esp32-arduino-lib-builder` deve ficar igual a este aqui, enviando os assets que nao estao no repo de destino.
-

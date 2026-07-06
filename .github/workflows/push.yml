@@ -203,23 +203,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Install build deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ninja-build cmake jq git wget curl libssl-dev libncurses-dev flex bison gperf python3-pip python3-serial python3-click python3-cryptography python3-future python3-pyparsing python3-pyelftools python3-venv libusb-1.0-0 libusb-1.0-0-dev libftdi1-2
-
-      - name: Restore ESP-IDF toolchain cache
-        uses: actions/cache/restore@v5
-        with:
-          path: ~/.espressif
-          key: espressif-toolchain-${{ runner.os }}-${{ hashFiles('versions.txt') }}
-          restore-keys: |
-            espressif-toolchain-${{ runner.os }}-
-
       - name: Prepare pinned source tree
-        env:
-          SELECTED_TARGETS: ${{ join(fromJSON(needs.prepare-matrix.outputs.matrix).target, ',') }}
-        run: python3 run.py --prepare-only --prefetch-components "$SELECTED_TARGETS"
+        run: python3 run.py --prepare-only
 
       - name: Pack prepared sources
         run: tar -czf prepared-sources.tar.gz build
