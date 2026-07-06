@@ -1,0 +1,15 @@
+# --- FATFS / SD ---
+# Choice: max sector 4096 -> 512. (Little effect for 512B cards, but harmless.)
+CONFIG_FATFS_SECTOR_512=y
+# 255 -> 128 (long-filename work buffer; already LFN_STACK)
+CONFIG_FATFS_MAX_LFN=128
+# Disable CONFIG_FATFS_PER_FILE_CACHE to use a single shared cache when reducing RAM usage is the priority.
+CONFIG_FATFS_PER_FILE_CACHE=n
+# Enable CONFIG_FATFS_USE_DYN_BUFFERS so each mounted volume uses buffers sized to its actual sector size.
+CONFIG_FATFS_USE_DYN_BUFFERS=y
+
+# --- MDNS Optimization
+CONFIG_MDNS_ENABLE_CONSOLE_CLI=n
+CONFIG_MDNS_MULTIPLE_INSTANCE=n
+CONFIG_MDNS_ACTION_QUEUE_LEN=4
+CONFIG_MDNS_MAX_SERVICES=2

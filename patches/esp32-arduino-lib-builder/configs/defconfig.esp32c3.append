@@ -61,12 +61,6 @@ CONFIG_ESP_WIFI_RX_BA_WIN=6
 # 32 -> 16
 CONFIG_ESP_WIFI_MGMT_SBUF_NUM=16
 
-# --- FATFS / SD ---
-# Choice: max sector 4096 -> 512. (Little effect for 512B cards, but harmless.)
-# CONFIG_FATFS_SECTOR_512=y
-# 255 -> 128 (long-filename work buffer; already LFN_STACK)
-CONFIG_FATFS_MAX_LFN=128
-
 # --- PSRAM boards only (no effect on cardputer / no-PSRAM) ---
 # 0 -> 32K: reserve internal DRAM for Wi-Fi/BLE DMA when PSRAM is present.
 CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
