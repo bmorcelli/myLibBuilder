@@ -12,57 +12,57 @@ on:
           - all
           - selected
       esp32:
-        description: Include esp32 when build_mode=selected
+        description: ESP32
         type: boolean
         required: false
         default: false
       esp32s3:
-        description: Include esp32s3 when build_mode=selected
+        description: ESP32s3
         type: boolean
         required: false
         default: false
       esp32s2:
-        description: Include esp32s2 when build_mode=selected
+        description: ESP32s2
         type: boolean
         required: false
         default: false
       esp32c2:
-        description: Include esp32c2 when build_mode=selected
+        description: ESP32c2
         type: boolean
         required: false
         default: false
       esp32c3:
-        description: Include esp32c3 when build_mode=selected
+        description: ESP32c3
         type: boolean
         required: false
         default: false
       esp32c6:
-        description: Include esp32c6 when build_mode=selected
+        description: ESP32c6
         type: boolean
         required: false
         default: false
       esp32h2:
-        description: Include esp32h2 when build_mode=selected
+        description: ESP32h2
         type: boolean
         required: false
         default: false
       esp32p4:
-        description: Include esp32p4 when build_mode=selected
+        description: ESP32p4
         type: boolean
         required: false
         default: false
       esp32p4_es:
-        description: Include esp32p4_es when build_mode=selected
+        description: ESP32p4_es
         type: boolean
         required: false
         default: false
       esp32c5:
-        description: Include esp32c5 when build_mode=selected
+        description: ESP32c5
         type: boolean
         required: false
         default: false
       esp32c61:
-        description: Include esp32c61 when build_mode=selected
+        description: ESP32c61
         type: boolean
         required: false
         default: false

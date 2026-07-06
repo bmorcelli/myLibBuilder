@@ -301,10 +301,11 @@ def build_target(target: str | None = None) -> None:
     env["AR_SOURCE_BRANCH"] = "master"
     env["IDF_BRANCH"] = "master"
     enable_local_ccache(env)
-    cmd = ["bash", "build.sh", "-s", "-e"]
+    build_args = ["build.sh", "-s", "-e"]
     if target:
-        cmd[2:2] = ["-t", target]
-    subprocess.run(cmd, cwd=builder_dir, check=True, env=env)
+        build_args[1:1] = ["-t", target]
+    build_cmd = 'source "$IDF_PATH/export.sh" >/dev/null && exec bash ' + " ".join(build_args)
+    subprocess.run(["bash", "-c", build_cmd], cwd=builder_dir, check=True, env=env)
 
 
 def versions_file_for(target: str) -> Path:

@@ -86,7 +86,7 @@ espressif__cbor: 0.6.1~4
                 build_target("esp32")
 
             subprocess_run.assert_called_once()
-            self.assertEqual(subprocess_run.call_args.args[0], ["bash", "build.sh", "-t", "esp32", "-s", "-e"])
+            self.assertEqual(subprocess_run.call_args.args[0], ["bash", "-c", 'source "$IDF_PATH/export.sh" >/dev/null && exec bash build.sh -t esp32 -s -e'])
 
     def test_build_target_without_target_lets_build_sh_build_all_envs(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -102,7 +102,7 @@ espressif__cbor: 0.6.1~4
                 build_target()
 
             subprocess_run.assert_called_once()
-            self.assertEqual(subprocess_run.call_args.args[0], ["bash", "build.sh", "-s", "-e"])
+            self.assertEqual(subprocess_run.call_args.args[0], ["bash", "-c", 'source "$IDF_PATH/export.sh" >/dev/null && exec bash build.sh -s -e'])
 
 
 if __name__ == "__main__":
