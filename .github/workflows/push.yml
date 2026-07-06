@@ -3,6 +3,11 @@ name: Build ESP32 Libraries
 on:
   workflow_dispatch:
     inputs:
+      use_ccache:
+        description: Use bounded ccache in matrix builds
+        type: boolean
+        required: false
+        default: true
       build_mode:
         description: Build all available targets or only selected targets
         type: choice
@@ -46,11 +51,6 @@ on:
         type: boolean
         required: false
         default: false
-      use_ccache:
-        description: Use bounded ccache in matrix builds
-        type: boolean
-        required: false
-        default: true
       esp32c3:
         description: ESP32-C3
         type: boolean
