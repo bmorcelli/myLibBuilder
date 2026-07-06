@@ -61,13 +61,6 @@ CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=128
 CONFIG_BT_NIMBLE_MSYS_2_BLOCK_COUNT=12
 # 12 -> 8
 CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=8
-# Keep default 3: fewer bonds breaks auto-reconnect (device must be re-paired).
-CONFIG_BT_NIMBLE_MAX_BONDS=3
-# Keep default 8: a BLE HID keyboard needs several CCCD (subscription) slots
-# (input report, boot keyboard, battery, consumer). 4 broke HID notifications
-# -> phone never subscribes ("Client subscribed to notifications" missing) and
-# keystrokes/commands are not delivered. Negligible RAM anyway.
-CONFIG_BT_NIMBLE_MAX_CCCDS=8
 
 # --- Wi-Fi buffers (internal on no-PSRAM boards) ---
 # 8 -> 4 (~1.6KB each -> ~6KB). Biggest single Wi-Fi saving.
@@ -85,7 +78,7 @@ CONFIG_ESP_WIFI_MGMT_SBUF_NUM=16
 
 # --- FATFS / SD ---
 # Choice: max sector 4096 -> 512. (Little effect for 512B cards, but harmless.)
-CONFIG_FATFS_SECTOR_512=y
+# CONFIG_FATFS_SECTOR_512=y
 # 255 -> 128 (long-filename work buffer; already LFN_STACK)
 CONFIG_FATFS_MAX_LFN=128
 

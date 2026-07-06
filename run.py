@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import json
 import os
 import re
 import shutil
@@ -282,8 +283,11 @@ def ensure_idf_environment() -> None:
     subprocess.run(["bash", str(install_script)], cwd=idf_dir, check=True)
 
 
-def enable_local_ccache(env: Dict[str, str]) -> None:
-    if os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
+def enable_ccache(env: Dict[str, str]) -> None:
+    requested = os.environ.get("MYLIBBUILDER_ENABLE_CCACHE")
+    if requested is not None and requested.lower() not in {"1", "true", "yes", "on"}:
+        return
+    if requested is None and os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
         return
     if shutil.which("ccache") is None:
         return
@@ -300,7 +304,7 @@ def build_target(target: str | None = None) -> None:
     env["IDF_PATH"] = str(SUBMODULES["esp-idf"])
     env["AR_SOURCE_BRANCH"] = "master"
     env["IDF_BRANCH"] = "master"
-    enable_local_ccache(env)
+    enable_ccache(env)
     build_args = ["build.sh", "-s", "-e"]
     if target:
         build_args[1:1] = ["-t", target]
@@ -352,6 +356,47 @@ def prepare_sources(versions: Dict[str, Dict[str, object]]) -> None:
         materialize_git_submodules(repo_path)
 
 
+def _selected_build_targets(targets: list[str]) -> list[tuple[str, str, str]]:
+    builds_file = SUBMODULES["esp32-arduino-lib-builder"] / "configs" / "builds.json"
+    builds = json.loads(builds_file.read_text(encoding="utf-8"))
+    selected = []
+    wanted = set(targets)
+    for target_json in builds["targets"]:
+        idf_target = target_json["target"]
+        chip_variant = target_json.get("chip_variant", idf_target)
+        if chip_variant not in wanted:
+            continue
+        configs = ["configs/defconfig.common", f"configs/defconfig.{chip_variant}", "configs/defconfig.debug_default"]
+        configs.extend(f"configs/defconfig.{feature}" for feature in target_json.get("features", []))
+        configs.extend(f"configs/defconfig.{feature}" for feature in target_json.get("idf_libs", []))
+        selected.append((idf_target, chip_variant, ";".join(configs)))
+    return selected
+
+
+def prefetch_managed_components(targets: list[str]) -> None:
+    if not targets:
+        return
+    builder_dir = SUBMODULES["esp32-arduino-lib-builder"]
+    ensure_idf_environment()
+    env = os.environ.copy()
+    env["IDF_PATH"] = str(SUBMODULES["esp-idf"])
+    env["AR_SOURCE_BRANCH"] = "master"
+    env["IDF_BRANCH"] = "master"
+
+    for idf_target, chip_variant, configs in _selected_build_targets(targets):
+        print(f"[prefetch] managed components for {chip_variant}", flush=True)
+        cmd = (
+            'source "$IDF_PATH/export.sh" >/dev/null && '
+            f'idf.py -DIDF_TARGET="{idf_target}" -DSDKCONFIG_DEFAULTS="{configs}" reconfigure'
+        )
+        subprocess.run(["bash", "-c", cmd], cwd=builder_dir, check=True, env=env)
+
+    shutil.rmtree(builder_dir / "build", ignore_errors=True)
+    sdkconfig = builder_dir / "sdkconfig"
+    if sdkconfig.exists():
+        sdkconfig.unlink()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build ESP32 Arduino libraries from pinned versions")
     parser.add_argument("-t", "--target", choices=TARGETS, help="Target to build")
@@ -365,6 +410,11 @@ def main() -> None:
         "--prepare-only",
         action="store_true",
         help="Only checkout pinned repositories, apply component versions/patches, download git submodules, then exit.",
+    )
+    parser.add_argument(
+        "--prefetch-components",
+        metavar="TARGETS",
+        help="With --prepare-only, prefetch ESP-IDF managed components for a comma-separated target list.",
     )
     parser.add_argument(
         "--build-only",
@@ -399,6 +449,12 @@ def main() -> None:
         prepare_sources(versions)
 
     if args.prepare_only:
+        if args.prefetch_components:
+            targets = [target.strip() for target in args.prefetch_components.split(",") if target.strip()]
+            invalid = [target for target in targets if target not in TARGETS]
+            if invalid:
+                parser.error(f"invalid --prefetch-components target(s): {', '.join(invalid)}")
+            prefetch_managed_components(targets)
         print("[prepare-only] sources ready, skipping build", flush=True)
         return
 

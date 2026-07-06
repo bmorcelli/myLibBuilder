@@ -15,54 +15,59 @@ on:
         description: ESP32
         type: boolean
         required: false
-        default: false
+        default: true
       esp32s3:
-        description: ESP32s3
+        description: ESP32-S3
         type: boolean
         required: false
-        default: false
-      esp32s2:
-        description: ESP32s2
-        type: boolean
-        required: false
-        default: false
-      esp32c2:
-        description: ESP32c2
-        type: boolean
-        required: false
-        default: false
-      esp32c3:
-        description: ESP32c3
-        type: boolean
-        required: false
-        default: false
-      esp32c6:
-        description: ESP32c6
-        type: boolean
-        required: false
-        default: false
-      esp32h2:
-        description: ESP32h2
-        type: boolean
-        required: false
-        default: false
-      esp32p4:
-        description: ESP32p4
-        type: boolean
-        required: false
-        default: false
-      esp32p4_es:
-        description: ESP32p4_es
-        type: boolean
-        required: false
-        default: false
+        default: true
       esp32c5:
-        description: ESP32c5
+        description: ESP32-C5
+        type: boolean
+        required: false
+        default: true
+      esp32c6:
+        description: ESP32-C6
+        type: boolean
+        required: false
+        default: true
+      esp32p4:
+        description: ESP32-P4
+        type: boolean
+        required: false
+        default: true
+      esp32p4_es:
+        description: ESP32-P4-es
+        type: boolean
+        required: false
+        default: true
+      esp32c2:
+        description: ESP32-C2
+        type: boolean
+        required: false
+        default: false
+      use_ccache:
+        description: Use bounded ccache in matrix builds
+        type: boolean
+        required: false
+        default: true
+      esp32c3:
+        description: ESP32-C3
         type: boolean
         required: false
         default: false
       esp32c61:
-        description: ESP32c61
+        description: ESP32-C61
+        type: boolean
+        required: false
+        default: false
+      esp32h2:
+        description: ESP32-H2
+        type: boolean
+        required: false
+        default: false
+      esp32s2:
+        description: ESP32-S2
         type: boolean
         required: false
         default: false
@@ -134,18 +139,18 @@ jobs:
       matrix: ${{ fromJSON(needs.prepare-matrix.outputs.matrix) }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install build deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build cmake jq git wget curl libssl-dev libncurses-dev flex bison gperf python3-pip python3-serial python3-click python3-cryptography python3-future python3-pyparsing python3-pyelftools python3-venv libusb-1.0-0 libusb-1.0-0-dev libftdi1-2
+          sudo apt-get install -y ninja-build cmake ccache jq git wget curl libssl-dev libncurses-dev flex bison gperf python3-pip python3-serial python3-click python3-cryptography python3-future python3-pyparsing python3-pyelftools python3-venv libusb-1.0-0 libusb-1.0-0-dev libftdi1-2
 
       # Restore-only: the "Warm toolchain cache" workflow is the sole writer, so
       # the 8 matrix jobs don't race to save ~1-2 GB each. On a miss the build
       # still works (run.py's install.sh just downloads the toolchain), only slower.
       - name: Restore ESP-IDF toolchain cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: ~/.espressif
           key: espressif-toolchain-${{ runner.os }}-${{ hashFiles('versions.txt') }}
@@ -153,22 +158,41 @@ jobs:
             espressif-toolchain-${{ runner.os }}-
 
       - name: Download prepared sources
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: prepared-sources
           path: .
 
       - name: Extract prepared sources
-        run: tar -xzf prepared-sources.tar.gz
+        run: |
+          tar -xzf prepared-sources.tar.gz
+          rm -f prepared-sources.tar.gz
+
+      - name: Configure ccache
+        if: inputs.use_ccache
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache/${{ matrix.target }}
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache --max-size=3G
+          ccache --zero-stats
 
       - name: Build Libs for ${{ matrix.target }}
+        env:
+          MYLIBBUILDER_ENABLE_CCACHE: ${{ inputs.use_ccache && '1' || '0' }}
+          CCACHE_DIR: ${{ github.workspace }}/.ccache/${{ matrix.target }}
         run: python3 run.py --build-only -t ${{ matrix.target }}
 
+      - name: Show ccache stats
+        if: always() && inputs.use_ccache
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache/${{ matrix.target }}
+        run: ccache --show-stats || true
+
       - name: Upload archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: artifacts-${{ matrix.target }}
-          # path: /tmp/myLibBuilder-repos/esp32-arduino-lib-builder/dist
           path: build/esp32-arduino-lib-builder/dist
 
   prepare-sources:
@@ -177,16 +201,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build cmake jq git wget curl libssl-dev libncurses-dev flex bison gperf python3-pip python3-serial python3-click python3-cryptography python3-future python3-pyparsing python3-pyelftools python3-venv libusb-1.0-0 libusb-1.0-0-dev libftdi1-2
+
+      - name: Restore ESP-IDF toolchain cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/.espressif
+          key: espressif-toolchain-${{ runner.os }}-${{ hashFiles('versions.txt') }}
+          restore-keys: |
+            espressif-toolchain-${{ runner.os }}-
 
       - name: Prepare pinned source tree
-        run: python3 run.py --prepare-only
+        env:
+          SELECTED_TARGETS: ${{ join(fromJSON(needs.prepare-matrix.outputs.matrix).target, ',') }}
+        run: python3 run.py --prepare-only --prefetch-components "$SELECTED_TARGETS"
 
       - name: Pack prepared sources
         run: tar -czf prepared-sources.tar.gz build
 
       - name: Upload prepared sources
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: prepared-sources
           path: prepared-sources.tar.gz
@@ -201,7 +240,7 @@ jobs:
       actions: write
     steps:
       - name: Delete prepared-sources artifact
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
@@ -226,10 +265,10 @@ jobs:
       contents: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: dist
           pattern: artifacts-*
@@ -258,13 +297,13 @@ jobs:
           echo "archive_path=${archive_path}" >> "${GITHUB_OUTPUT}"
 
       - name: Upload full esp32-arduino-libs archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: esp32-arduino-libs
           path: ${{ steps.prepare_archive.outputs.archive_path }}
 
       - name: Upload package_esp32_index.template.json
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: package-esp32-index-json
           path: dist/package_esp32_index.template.json
