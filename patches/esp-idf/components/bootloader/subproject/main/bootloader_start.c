@@ -15,6 +15,7 @@ static const char *TAG = "boot";
 
 static int select_partition_number(bootloader_state_t *bs);
 static int selected_boot_partition(const bootloader_state_t *bs);
+static bool should_try_launcher_test_partition(int reset_reason);
 
 /*
  * We arrive here after the ROM bootloader finished loading this second stage bootloader from flash.
@@ -88,7 +89,7 @@ static int selected_boot_partition(const bootloader_state_t *bs)
 
     // components/soc/esp32p4/include/soc/reset_reasons.h
     int reset_reason = esp_rom_get_reset_reason(0);
-    if (reset_reason == RESET_REASON_CHIP_POWER_ON || reset_reason == RESET_REASON_CORE_DEEP_SLEEP || reset_reason == RESET_REASON_CORE_MWDT) {
+    if (should_try_launcher_test_partition(reset_reason)) {
         if (bs->test.offset != 0) {
             return TEST_APP_INDEX;
         }
@@ -98,6 +99,29 @@ static int selected_boot_partition(const bootloader_state_t *bs)
     }
 
     return boot_index;
+}
+
+static bool should_try_launcher_test_partition(int reset_reason)
+{
+    if (reset_reason == RESET_REASON_CHIP_POWER_ON || reset_reason == RESET_REASON_CORE_DEEP_SLEEP) {
+        return true;
+    }
+#if defined(RESET_REASON_CORE_MWDT)
+    if (reset_reason == RESET_REASON_CORE_MWDT) {
+        return true;
+    }
+#endif
+#if defined(RESET_REASON_CORE_MWDT0)
+    if (reset_reason == RESET_REASON_CORE_MWDT0) {
+        return true;
+    }
+#endif
+#if defined(RESET_REASON_CORE_MWDT1)
+    if (reset_reason == RESET_REASON_CORE_MWDT1) {
+        return true;
+    }
+#endif
+    return false;
 }
 
 #if CONFIG_LIBC_NEWLIB

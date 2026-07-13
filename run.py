@@ -204,6 +204,7 @@ def update_component_versions(repo_path: Path, versions: Dict[str, str]) -> None
     component_files = [
         repo_path / "idf_component.yml",
         repo_path / "components" / "idf_component.yml",
+        repo_path / "components" / "arduino" / "idf_component.yml",
         repo_path / "dependencies.lock",
     ]
     for component_file in component_files:
