@@ -1,5 +1,5 @@
 diff --git a/components/arduino/CMakeLists.txt b/components/arduino/CMakeLists.txt
-index 2e54a060..f126b00f 100644
+index 2e54a060..5f8f64c6 100644
 --- a/components/arduino/CMakeLists.txt
 +++ b/components/arduino/CMakeLists.txt
 @@ -105,7 +105,6 @@ set(LIBRARY_SRCS
@@ -10,38 +10,7 @@ index 2e54a060..f126b00f 100644
    NetBIOS
    Network
    OpenThread
-@@ -190,30 +189,6 @@ set(ARDUINO_LIBRARY_OpenThread_SRCS
-   libraries/OpenThread/src/OThreadCLI.cpp
-   libraries/OpenThread/src/OThreadCLI_Util.cpp)
- 
--set(ARDUINO_LIBRARY_Matter_SRCS
--  libraries/Matter/src/MatterEndpoints/MatterGenericSwitch.cpp
--  libraries/Matter/src/MatterEndpoints/MatterOnOffLight.cpp
--  libraries/Matter/src/MatterEndpoints/MatterDimmableLight.cpp
--  libraries/Matter/src/MatterEndpoints/MatterColorTemperatureLight.cpp
--  libraries/Matter/src/MatterEndpoints/MatterColorLight.cpp
--  libraries/Matter/src/MatterEndpoints/MatterEnhancedColorLight.cpp
--  libraries/Matter/src/MatterEndpoints/MatterFan.cpp
--  libraries/Matter/src/MatterEndpoints/MatterTemperatureSensor.cpp
--  libraries/Matter/src/MatterEndpoints/MatterTemperatureControlledCabinet.cpp
--  libraries/Matter/src/MatterEndpoints/MatterHumiditySensor.cpp
--  libraries/Matter/src/MatterEndpoints/MatterContactSensor.cpp
--  libraries/Matter/src/MatterEndpoints/MatterWaterLeakDetector.cpp
--  libraries/Matter/src/MatterEndpoints/MatterWaterFreezeDetector.cpp
--  libraries/Matter/src/MatterEndpoints/MatterRainSensor.cpp
--  libraries/Matter/src/MatterEndpoints/MatterPressureSensor.cpp
--  libraries/Matter/src/MatterEndpoints/MatterOccupancySensor.cpp
--  libraries/Matter/src/MatterEndpoints/MatterOnOffPlugin.cpp
--  libraries/Matter/src/MatterEndpoints/MatterDimmablePlugin.cpp
--  libraries/Matter/src/MatterEndpoints/MatterThermostat.cpp
--  libraries/Matter/src/MatterEndpoints/MatterWindowCovering.cpp
--  libraries/Matter/src/Matter.cpp
--  libraries/Matter/src/MatterEndPoint.cpp)
--
- set(ARDUINO_LIBRARY_PPP_SRCS libraries/PPP/src/PPP.cpp)
- 
- set(ARDUINO_LIBRARY_Preferences_SRCS libraries/Preferences/src/Preferences.cpp)
-@@ -508,9 +484,6 @@ endif()
+@@ -508,9 +507,6 @@ endif()
  if(NOT CONFIG_ARDUINO_SELECTIVE_COMPILATION OR CONFIG_ARDUINO_SELECTIVE_ESP_SR)
      maybe_add_component(espressif__esp_sr)
  endif()
@@ -65,16 +34,11 @@ index 8d6f78e4..53d0cd3e 100644
 -    rules:
 -      - if: "target not in [esp32c2, esp32p4, esp32c61]"
 diff --git a/components/arduino/idf_component.yml b/components/arduino/idf_component.yml
-index 7c9cf365..4d2c8ca5 100644
+index 7c9cf365..f8bf0ce7 100644
 --- a/components/arduino/idf_component.yml
 +++ b/components/arduino/idf_component.yml
-@@ -133,9 +133,6 @@ dependencies:
-     require: public
-     rules:
-       - if: idf_version < 6.0
+@@ -136,4 +136,1 @@ dependencies:
 -  espressif/esp-modbus:
 -    version: "^2.1.2"
 -    require: public
    joltwallet/littlefs:
-     version: "1.22.1"
-   chmorgan/esp-libhelix-mp3:
