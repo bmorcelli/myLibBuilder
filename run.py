@@ -74,7 +74,34 @@ def run_git(repo_path: Path, *args: str, capture: bool = False, check: bool = Tr
     return result
 
 
+def is_relative_to(path: Path, base: Path) -> bool:
+    try:
+        path.resolve().relative_to(base.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def reset_prepared_checkout(repo_path: Path) -> None:
+    """Return a reused source checkout to its pinned upstream state before patches.
+
+    Patch application mutates tracked files such as configs/defconfig.*. CI cache
+    reuse can otherwise append the same fragments repeatedly or leave stale hunks
+    from a previous target.
+    """
+    if not repo_path.exists():
+        return
+    if not (repo_path / ".git").exists():
+        if not is_relative_to(repo_path, TMP_ROOT):
+            raise RuntimeError(f"Refusing to remove non-git path outside build root: {repo_path}")
+        shutil.rmtree(repo_path)
+        return
+    run_git(repo_path, "reset", "--hard", "HEAD")
+    run_git(repo_path, "clean", "-ffdx")
+
+
 def checkout_submodule_version(repo_path: Path, version: Tuple[str, str], repo_name: str | None = None) -> None:
+    reset_prepared_checkout(repo_path)
     if not repo_path.exists():
         repo_name = repo_name or repo_path.name
         repo_url = REPOSITORY_URLS.get(repo_name)
