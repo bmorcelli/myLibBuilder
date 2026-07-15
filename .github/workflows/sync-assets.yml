@@ -56,9 +56,28 @@ jobs:
               --notes "Automated build artifacts synced from ${SOURCE_REPO}."
           fi
 
-          echo "Uploading assets to ${TARGET_REPO}@${RELEASE_TAG} ..."
-          gh release upload "${RELEASE_TAG}" "${workdir}"/* \
-            --repo "${TARGET_REPO}" \
-            --clobber
+          # Only upload assets that don't already exist on the target release,
+          # so existing assets keep their original upload date.
+          existing_assets="$(gh release view "${RELEASE_TAG}" --repo "${TARGET_REPO}" --json assets \
+            --jq '.assets[].name')"
+
+          new_assets=()
+          for f in "${workdir}"/*; do
+            name="$(basename "${f}")"
+            if grep -qxF "${name}" <<< "${existing_assets}"; then
+              echo "Skipping ${name} (already exists on target)."
+            else
+              new_assets+=("${f}")
+            fi
+          done
+
+          if [ "${#new_assets[@]}" -eq 0 ]; then
+            echo "No new assets to upload."
+            exit 0
+          fi
+
+          echo "Uploading new assets to ${TARGET_REPO}@${RELEASE_TAG} ..."
+          gh release upload "${RELEASE_TAG}" "${new_assets[@]}" \
+            --repo "${TARGET_REPO}"
 
           echo "Sync complete."
