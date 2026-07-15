@@ -6,12 +6,6 @@ CONFIG_LOG_DEFAULT_LEVEL=0
 # CONFIG_LOG_COLORS is not set
 CONFIG_ESP_ERR_TO_NAME_LOOKUP=n
 
-# Bluetooth is not used by Launcher. Some per-target defconfigs enable it again,
-# so target append files also force it off after the original target config.
-CONFIG_BT_ENABLED=n
-CONFIG_BT_BLE_BLUFI_ENABLE=n
-CONFIG_BLE_MESH=n
-
 # Wired Ethernet is not used by Launcher. The base ETH component must remain
 # buildable because the lib-builder still pulls LAN PHY managed components.
 CONFIG_ETH_SPI_ETHERNET_DM9051=n
