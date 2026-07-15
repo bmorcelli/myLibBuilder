@@ -33,10 +33,7 @@ CONFIG_ESP_WIFI_GCMP_SUPPORT=n
 CONFIG_ESP_MODEM_USE_PPP_MODE=n
 CONFIG_LWIP_IPV6=n
 CONFIG_LWIP_PPP_SUPPORT=n
-CONFIG_LWIP_IPV4_NAPT=n
-CONFIG_LWIP_IP_FORWARD=n
-CONFIG_LWIP_MULTICAST_PING=n
-CONFIG_LWIP_BROADCAST_PING=n
+
 
 # FAT/exFAT: ffconf.h is patched to enable exFAT; keep LFN on heap so exFAT
 # directory work does not consume extra task stack.
