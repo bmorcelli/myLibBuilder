@@ -89,6 +89,7 @@ static int selected_boot_partition(const bootloader_state_t *bs)
 
     // components/soc/esp32p4/include/soc/reset_reasons.h
     int reset_reason = esp_rom_get_reset_reason(0);
+    esp_rom_printf("[%s] Turned on because (1= POWERON_RESET or 5==ESP_RST_DEEPSLEEP) --> %d\n", TAG, esp_rom_get_reset_reason(0));
     if (should_try_launcher_test_partition(reset_reason)) {
         if (bs->test.offset != 0) {
             return TEST_APP_INDEX;
@@ -106,21 +107,12 @@ static bool should_try_launcher_test_partition(int reset_reason)
     if (reset_reason == RESET_REASON_CHIP_POWER_ON || reset_reason == RESET_REASON_CORE_DEEP_SLEEP) {
         return true;
     }
-#if defined(RESET_REASON_CORE_MWDT)
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
     if (reset_reason == RESET_REASON_CORE_MWDT) {
         return true;
     }
 #endif
-#if defined(RESET_REASON_CORE_MWDT0)
-    if (reset_reason == RESET_REASON_CORE_MWDT0) {
-        return true;
-    }
-#endif
-#if defined(RESET_REASON_CORE_MWDT1)
-    if (reset_reason == RESET_REASON_CORE_MWDT1) {
-        return true;
-    }
-#endif
+
     return false;
 }
 
