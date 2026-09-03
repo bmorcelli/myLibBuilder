@@ -1,3 +1,8 @@
+# This brench
+Allow skipping normal boot process by using a button pressed
+Allow Disabling Launcher after DeepSleep recovery
+
+
 # myLibBuilder
 O objetivo deste projeto é pré compilar o framework para ser usado nos meus projetos esp32 com platformio usando as versoes especificadas em `versions.txt` e com os patches nos arquivos, de acordo com o que está na pasta `patches`
 
