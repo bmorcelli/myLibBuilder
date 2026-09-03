@@ -1,0 +1,4 @@
+# See defconfig.80m_200m.append - same reasoning, this is the other flash-freq
+# variant of the last-loaded defconfig for esp32p4/esp32p4_es bootloader builds.
+CONFIG_BOOTLOADER_LOG_LEVEL_NONE=y
+CONFIG_BOOTLOADER_LOG_LEVEL=0

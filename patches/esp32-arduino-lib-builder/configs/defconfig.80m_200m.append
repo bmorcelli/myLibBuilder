@@ -1,0 +1,8 @@
+# Last-loaded defconfig for every esp32p4/esp32p4_es bootloader variant (see
+# configs/builds.json "bootloaders"/"idf_libs" combos), so this is where the
+# bootloader log level override actually sticks - defconfig.debug_default (loaded
+# earlier in the chain) already forces ERROR, but some variants (qio_ram + esp_sr +
+# qio + 80m_200m) still overflow the 0x6000-byte bootloader budget by a few hundred
+# bytes after the launcher NVS/GPIO read was added to the bootloader.
+CONFIG_BOOTLOADER_LOG_LEVEL_NONE=y
+CONFIG_BOOTLOADER_LOG_LEVEL=0

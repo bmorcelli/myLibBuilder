@@ -87,7 +87,7 @@ jobs:
           TARGET_ESP32: ${{ inputs.esp32 }}
           TARGET_ESP32S2: ${{ inputs.esp32s2 }}
           TARGET_ESP32S3: ${{ inputs.esp32s3 }}
-          TARGET_ESP32C2: ${{ inputs.esp32c2 }}
+          # TARGET_ESP32C2: ${{ inputs.esp32c2 }}
           TARGET_ESP32C3: ${{ inputs.esp32c3 }}
           TARGET_ESP32C6: ${{ inputs.esp32c6 }}
           TARGET_ESP32H2: ${{ inputs.esp32h2 }}
@@ -107,7 +107,7 @@ jobs:
               "esp32": os.environ["TARGET_ESP32"],
               "esp32s2": os.environ["TARGET_ESP32S2"],
               "esp32s3": os.environ["TARGET_ESP32S3"],
-              "esp32c2": os.environ["TARGET_ESP32C2"],
+              # "esp32c2": os.environ["TARGET_ESP32C2"],
               "esp32c3": os.environ["TARGET_ESP32C3"],
               "esp32c6": os.environ["TARGET_ESP32C6"],
               "esp32h2": os.environ["TARGET_ESP32H2"],
