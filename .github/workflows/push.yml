@@ -46,11 +46,11 @@ on:
         type: boolean
         required: false
         default: true
-      esp32c2:
-        description: ESP32-C2
-        type: boolean
-        required: false
-        default: false
+      #esp32c2:
+      #  description: ESP32-C2
+      #  type: boolean
+      #  required: false
+      #  default: false
       esp32c3:
         description: ESP32-C3
         type: boolean
@@ -83,7 +83,8 @@ jobs:
         id: matrix
         env:
           BUILD_MODE: ${{ inputs.build_mode }}
-          AVAILABLE_TARGETS: esp32,esp32s2,esp32s3,esp32c2,esp32c3,esp32c6,esp32h2,esp32p4,esp32p4_es,esp32c5,esp32c61
+          #AVAILABLE_TARGETS: esp32,esp32s2,esp32s3,esp32c2,esp32c3,esp32c6,esp32h2,esp32p4,esp32p4_es,esp32c5,esp32c61
+          AVAILABLE_TARGETS: esp32,esp32s2,esp32s3,esp32c3,esp32c6,esp32h2,esp32p4,esp32p4_es,esp32c5,esp32c61
           TARGET_ESP32: ${{ inputs.esp32 }}
           TARGET_ESP32S2: ${{ inputs.esp32s2 }}
           TARGET_ESP32S3: ${{ inputs.esp32s3 }}
