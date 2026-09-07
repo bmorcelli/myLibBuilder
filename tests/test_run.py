@@ -136,6 +136,11 @@ espressif__cbor: 0.6.1~4
             target_dir = payload / "tools" / "esp32-arduino-libs" / "esp32s3"
             target_dir.mkdir(parents=True)
             (target_dir / "sdkconfig").write_text("CONFIG_SPIRAM_RODATA=y\n", encoding="utf-8")
+            (target_dir / "pioarduino-build.py").write_text(
+                'build_mcu = board_config.get("build.mcu", "").lower()\n'
+                'CPPPATH=[join(FRAMEWORK_SDK_DIR, "esp32s3", "include"), join(FRAMEWORK_SDK_DIR, "esp32s3", "include", "soc", "esp32s3")]\n',
+                encoding="utf-8",
+            )
             with tarfile.open(archive, "w:gz") as tar:
                 tar.add(payload / "tools", arcname="tools")
 
@@ -150,8 +155,12 @@ espressif__cbor: 0.6.1~4
             self.assertTrue(variant_archive.exists())
             with tarfile.open(variant_archive, "r:gz") as tar:
                 names = tar.getnames()
+                pioarduino_build = tar.extractfile("tools/esp32-arduino-libs/esp32s3_2/pioarduino-build.py").read().decode("utf-8")
             self.assertIn("tools/esp32-arduino-libs/esp32s3_2/sdkconfig", names)
             self.assertNotIn("tools/esp32-arduino-libs/esp32s3/sdkconfig", names)
+            self.assertIn('build_mcu = {"esp32s3_2": "esp32s3"}.get(build_mcu, build_mcu)', pioarduino_build)
+            self.assertIn('join(FRAMEWORK_SDK_DIR, "esp32s3_2", "include")', pioarduino_build)
+            self.assertIn('join(FRAMEWORK_SDK_DIR, "esp32s3_2", "include", "soc", "esp32s3")', pioarduino_build)
 
     def test_build_target_without_target_lets_build_sh_build_all_envs(self):
         with tempfile.TemporaryDirectory() as tmpdir:

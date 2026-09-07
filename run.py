@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import io
 import os
 import re
 import shutil
@@ -356,13 +357,44 @@ def _rewrite_tar_target(source_tar: Path, dest_tar: Path, physical_target: str, 
     dest_prefix = f"tools/esp32-arduino-libs/{variant_target}"
     with tarfile.open(source_tar, "r:gz") as src, tarfile.open(dest_tar, "w:gz") as dst:
         for member in src.getmembers():
-            fileobj = src.extractfile(member) if member.isfile() else None
+            original_name = member.name
+            data = None
+            if member.isfile():
+                extracted = src.extractfile(member)
+                data = extracted.read() if extracted is not None else b""
+                if extracted is not None:
+                    extracted.close()
             member = member.replace(deep=False)
             if member.name == source_prefix or member.name.startswith(source_prefix + "/"):
                 member.name = dest_prefix + member.name[len(source_prefix):]
+            fileobj = None
+            if data is not None:
+                if original_name == source_prefix + "/pioarduino-build.py":
+                    data = _rewrite_variant_pioarduino_build(data, physical_target, variant_target)
+                    member.size = len(data)
+                fileobj = io.BytesIO(data)
             dst.addfile(member, fileobj)
             if fileobj is not None:
                 fileobj.close()
+
+
+def _rewrite_variant_pioarduino_build(data: bytes, physical_target: str, variant_target: str) -> bytes:
+    text = data.decode("utf-8")
+    replacements = {
+        f'join(FRAMEWORK_SDK_DIR, "{physical_target}"': f'join(FRAMEWORK_SDK_DIR, "{variant_target}"',
+        f"join(FRAMEWORK_SDK_DIR, '{physical_target}'": f"join(FRAMEWORK_SDK_DIR, '{variant_target}'",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    alias_line = f'build_mcu = {{"{variant_target}": "{physical_target}"}}.get(build_mcu, build_mcu)'
+    if alias_line not in text:
+        text = re.sub(
+            r'(build_mcu = board_config\.get\("build\.mcu", ""\)\.lower\(\)\r?\n)',
+            r'\1' + alias_line + "\n",
+            text,
+            count=1,
+        )
+    return text.encode("utf-8")
 
 
 def postprocess_variant_artifacts(target: str | None, existing_archives: Dict[Path, float]) -> None:
