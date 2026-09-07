@@ -5,6 +5,8 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
+import tempfile
 from pathlib import Path
 from typing import Dict, Tuple
 
@@ -12,7 +14,10 @@ ROOT = Path(__file__).resolve().parent
 DEFAULT_VERSIONS_FILE = ROOT / "versions.txt"
 PATCHES_ROOT = ROOT / "patches"
 TMP_ROOT = Path(os.environ.get("MYLIBBUILDER_ROOT", ROOT / "build"))
-TARGETS = ["esp32", "esp32s2", "esp32s3", "esp32c2", "esp32c3", "esp32c6", "esp32h2", "esp32p4", "esp32p4_es", "esp32c5", "esp32c61"]
+TARGETS = ["esp32", "esp32s2", "esp32s3", "esp32s3_2", "esp32c2", "esp32c3", "esp32c6", "esp32h2", "esp32p4", "esp32p4_es", "esp32c5", "esp32c61"]
+TARGET_ALIASES = {
+    "esp32s3_2": "esp32s3",
+}
 REPOSITORY_URLS = {
     "esp-idf": "https://github.com/espressif/esp-idf.git",
     "esp32-arduino-lib-builder": "https://github.com/espressif/esp32-arduino-lib-builder.git",
@@ -321,10 +326,77 @@ def enable_ccache(env: Dict[str, str]) -> None:
     env.setdefault("IDF_CCACHE_ENABLE", "1")
 
 
+def physical_target_for(target: str | None) -> str | None:
+    if target is None:
+        return None
+    return TARGET_ALIASES.get(target, target)
+
+
+def apply_variant_config(target: str | None) -> None:
+    physical_target = physical_target_for(target)
+    if target is None or physical_target == target:
+        return
+    builder_dir = SUBMODULES["esp32-arduino-lib-builder"]
+    config_path = builder_dir / "configs" / f"defconfig.{physical_target}"
+    fragment_path = PATCHES_ROOT / "esp32-arduino-lib-builder" / "configs" / f"defconfig.{target}.append"
+    if not fragment_path.exists():
+        raise FileNotFoundError(f"Variant config fragment not found: {fragment_path}")
+    marker = f"# myLibBuilder variant config: {target}\n".encode("utf-8")
+    current = _normalize_newlines(config_path.read_bytes()) if config_path.exists() else b""
+    if marker in current:
+        return
+    fragment = _normalize_newlines(fragment_path.read_bytes())
+    prefix = b"" if not current or current.endswith(b"\n") else b"\n"
+    config_path.write_bytes(current + prefix + fragment)
+    print(f"[variant] appended {fragment_path.name} to configs/defconfig.{physical_target}", flush=True)
+
+
+def _rewrite_tar_target(source_tar: Path, dest_tar: Path, physical_target: str, variant_target: str) -> None:
+    source_prefix = f"tools/esp32-arduino-libs/{physical_target}"
+    dest_prefix = f"tools/esp32-arduino-libs/{variant_target}"
+    with tarfile.open(source_tar, "r:gz") as src, tarfile.open(dest_tar, "w:gz") as dst:
+        for member in src.getmembers():
+            fileobj = src.extractfile(member) if member.isfile() else None
+            member = member.replace(deep=False)
+            if member.name == source_prefix or member.name.startswith(source_prefix + "/"):
+                member.name = dest_prefix + member.name[len(source_prefix):]
+            dst.addfile(member, fileobj)
+            if fileobj is not None:
+                fileobj.close()
+
+
+def postprocess_variant_artifacts(target: str | None, existing_archives: Dict[Path, float]) -> None:
+    physical_target = physical_target_for(target)
+    if target is None or physical_target == target:
+        return
+    dist_dir = SUBMODULES["esp32-arduino-lib-builder"] / "dist"
+    if not dist_dir.exists():
+        return
+    pattern = f"arduino-esp32-libs-{physical_target}-*.tar.gz"
+    candidates = []
+    for archive in dist_dir.glob(pattern):
+        mtime = archive.stat().st_mtime
+        if archive not in existing_archives or existing_archives[archive] != mtime:
+            candidates.append(archive)
+    for archive in candidates:
+        variant_archive = archive.with_name(archive.name.replace(f"-{physical_target}-", f"-{target}-", 1))
+        with tempfile.NamedTemporaryFile(dir=dist_dir, delete=False, suffix=".tar.gz") as tmp:
+            tmp_path = Path(tmp.name)
+        try:
+            _rewrite_tar_target(archive, tmp_path, physical_target, target)
+            tmp_path.replace(variant_archive)
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        archive.unlink()
+        print(f"[variant] wrote {variant_archive.name}", flush=True)
+
+
 def build_target(target: str | None = None) -> None:
     builder_dir = SUBMODULES["esp32-arduino-lib-builder"]
     if not builder_dir.exists():
         raise FileNotFoundError(f"Builder checkout not found: {builder_dir}")
+    apply_variant_config(target)
     ensure_system_dependencies()
     ensure_idf_environment()
     env = os.environ.copy()
@@ -333,10 +405,14 @@ def build_target(target: str | None = None) -> None:
     env["IDF_BRANCH"] = "master"
     enable_ccache(env)
     build_args = ["build.sh", "-s", "-e"]
-    if target:
-        build_args[1:1] = ["-t", target]
+    physical_target = physical_target_for(target)
+    if physical_target:
+        build_args[1:1] = ["-t", physical_target]
     build_cmd = 'source "$IDF_PATH/export.sh" >/dev/null && exec bash ' + " ".join(build_args)
+    dist_dir = builder_dir / "dist"
+    existing_archives = {path: path.stat().st_mtime for path in dist_dir.glob("arduino-esp32-libs-*.tar.gz")} if dist_dir.exists() else {}
     subprocess.run(["bash", "-c", build_cmd], cwd=builder_dir, check=True, env=env)
+    postprocess_variant_artifacts(target, existing_archives)
 
 
 def versions_file_for(target: str) -> Path:

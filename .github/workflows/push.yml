@@ -26,6 +26,11 @@ on:
         type: boolean
         required: false
         default: true
+      esp32s3_2:
+        description: ESP32-S3 extra IRAM/PSRAM flags
+        type: boolean
+        required: false
+        default: true
       esp32c5:
         description: ESP32-C5
         type: boolean
@@ -84,10 +89,11 @@ jobs:
         env:
           BUILD_MODE: ${{ inputs.build_mode }}
           #AVAILABLE_TARGETS: esp32,esp32s2,esp32s3,esp32c2,esp32c3,esp32c6,esp32h2,esp32p4,esp32p4_es,esp32c5,esp32c61
-          AVAILABLE_TARGETS: esp32,esp32s2,esp32s3,esp32c3,esp32c6,esp32h2,esp32p4,esp32p4_es,esp32c5,esp32c61
+          AVAILABLE_TARGETS: esp32,esp32s2,esp32s3,esp32s3_2,esp32c3,esp32c6,esp32h2,esp32p4,esp32p4_es,esp32c5,esp32c61
           TARGET_ESP32: ${{ inputs.esp32 }}
           TARGET_ESP32S2: ${{ inputs.esp32s2 }}
           TARGET_ESP32S3: ${{ inputs.esp32s3 }}
+          TARGET_ESP32S3_2: ${{ inputs.esp32s3_2 }}
           # TARGET_ESP32C2: ${{ inputs.esp32c2 }}
           TARGET_ESP32C3: ${{ inputs.esp32c3 }}
           TARGET_ESP32C6: ${{ inputs.esp32c6 }}
@@ -108,6 +114,7 @@ jobs:
               "esp32": os.environ["TARGET_ESP32"],
               "esp32s2": os.environ["TARGET_ESP32S2"],
               "esp32s3": os.environ["TARGET_ESP32S3"],
+              "esp32s3_2": os.environ["TARGET_ESP32S3_2"],
               # "esp32c2": os.environ["TARGET_ESP32C2"],
               "esp32c3": os.environ["TARGET_ESP32C3"],
               "esp32c6": os.environ["TARGET_ESP32C6"],
